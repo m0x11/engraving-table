@@ -57,20 +57,32 @@ export default function Home() {
         const validChars: string[] = [];
 
         for (const char of text) {
-          const glyph = glyphMap.get(char);
+          // Handle middle dot "·" by using period with vertical offset
+          const lookupChar = char === "·" ? "." : char;
+          const glyph = glyphMap.get(lookupChar);
+
           if (glyph && glyph.atlasBounds && glyph.planeBounds) {
             const uMin = glyph.atlasBounds.left / ATLAS_SIZE;
             const uMax = glyph.atlasBounds.right / ATLAS_SIZE;
             const vMin = glyph.atlasBounds.bottom / ATLAS_SIZE;
             const vMax = glyph.atlasBounds.top / ATLAS_SIZE;
 
+            // Calculate vertical offset for middle dot
+            // Period sits near baseline, shift it up to center vs uppercase/numbers
+            let verticalOffset = 0;
+            if (char === "·") {
+              const periodCenter = (glyph.planeBounds.bottom + glyph.planeBounds.top) / 2;
+              const targetCenter = 0.34; // Center of uppercase letters (~-0.09 to 0.78)
+              verticalOffset = targetCenter - periodCenter;
+            }
+
             glyphUniforms.push({
               uv: new THREE.Vector4(uMin, vMin, uMax, vMax),
               plane: new THREE.Vector4(
                 glyph.planeBounds.left,
-                glyph.planeBounds.bottom,
+                glyph.planeBounds.bottom + verticalOffset,
                 glyph.planeBounds.right,
-                glyph.planeBounds.top
+                glyph.planeBounds.top + verticalOffset
               ),
             });
             validChars.push(char);
