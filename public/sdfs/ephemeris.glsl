@@ -681,7 +681,7 @@ float stamp(vec3 p) {
 
 float mapScene(vec3 p) {
    
-    float targetDate = 163107810.;
+    float targetDate = 942347471.;
 
     // 1) Transform to bowl space
     vec3 transformedP = transformToBowl(p);

@@ -253,8 +253,8 @@ export default function Home() {
             // angle -> text X (arc length), h -> text Y
             float textScale = 1.0;  // Scale text to fit nicely
             
-            float textX = angle * cylinderRadius / textScale;  // Arc length scaled
-            float textY = (h + 0.3) / textScale;  // Center text vertically, + offset for top positioning
+            float textX = -angle * cylinderRadius / textScale;  // Arc length scaled (negated to flip)
+            float textY = -(h + 0.3) / textScale;  // Center text vertically, flipped 180 degrees
 
             // Sample 2D text SDF
             float d2d = textSdf2D(vec2(textX, textY));
@@ -273,16 +273,16 @@ export default function Home() {
             // Ephemeris SDF (ring) - use as-is
             float dEphemeris = ephemerisSdf(p);
 
+            ${hasText ? `
             // Text wrapped on inner cylinder surface
             float dText = textOnInnerCylinder(p);
 
-            // Debug: show just ring
-            // return dEphemeris;
-            // Debug: show just text cylinder
-            // return dText;
-
             // Engrave text into ring (subtract text from ring)
             return max(dEphemeris, -dText);
+            ` : `
+            // No text, just return ring
+            return dEphemeris;
+            `}
           }
 
           vec3 calcNormal(vec3 p) {
@@ -350,20 +350,25 @@ export default function Home() {
       // Log shader for debugging
       console.log("Fragment shader length:", fragmentShader.length);
 
+      const uniforms: Record<string, { value: unknown }> = {
+        uResolution: {
+          value: new THREE.Vector2(window.innerWidth, window.innerHeight),
+        },
+        uTime: { value: 0 },
+        uMsdfTexture: { value: msdfTexture },
+        uRotation: { value: new THREE.Vector3(0, 0, 0) },
+        uZoom: { value: 1.0 },
+      };
+
+      if (hasText) {
+        uniforms.uGlyphUV = { value: glyphUniforms.map((g) => g.uv) };
+        uniforms.uGlyphPlane = { value: glyphUniforms.map((g) => g.plane) };
+      }
+
       const material = new THREE.ShaderMaterial({
         vertexShader,
         fragmentShader,
-        uniforms: {
-          uResolution: {
-            value: new THREE.Vector2(window.innerWidth, window.innerHeight),
-          },
-          uTime: { value: 0 },
-          uMsdfTexture: { value: msdfTexture },
-          uRotation: { value: new THREE.Vector3(0, 0, 0) },
-          uZoom: { value: 1.0 },
-          uGlyphUV: { value: glyphUniforms.map((g) => g.uv) },
-          uGlyphPlane: { value: glyphUniforms.map((g) => g.plane) },
-        },
+        uniforms,
       });
 
       // Check for shader compilation errors
