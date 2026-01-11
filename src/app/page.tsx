@@ -27,12 +27,22 @@ export default function Home() {
     const container = containerRef.current;
     let animationId: number;
 
-    // Load font data and set up scene
-    fetch("/fonts/PPRightSerifMono-msdf.json")
-      .then((res) => res.json())
-      .then((fontData: FontData) => {
-        // Build glyph lookup by character
-        const glyphMap = new Map<string, GlyphData>();
+    // Load font data and ephemeris SDF
+    Promise.all([
+      fetch("/fonts/PPRightSerifMono-msdf.json").then((res) => res.json()),
+      fetch("/sdfs/ephemeris.glsl").then((res) => res.text()),
+    ]).then(([fontData, ephemerisGlsl]: [FontData, string]) => {
+      // Process ephemeris GLSL - rename functions and remove conflicting defines
+      const processedEphemeris = ephemerisGlsl
+        .replace(/mapDistance/g, "ephemerisSdf")
+        .replace(/mapScene/g, "ephemerisScene")
+        // Remove conflicting raymarching constants (we define our own)
+        .replace(/#define MAX_STEPS \d+/g, "// MAX_STEPS defined above")
+        .replace(/#define MAX_DIST[^\n]*/g, "// MAX_DIST defined above")
+        .replace(/#define SURF_DIST[^\n]*/g, "// SURF_DIST defined above");
+
+      // Build glyph lookup by character
+      const glyphMap = new Map<string, GlyphData>();
         for (const glyph of fontData.glyphs) {
           const char = String.fromCharCode(glyph.unicode);
           glyphMap.set(char, glyph);
@@ -132,12 +142,16 @@ export default function Home() {
           uniform vec4 uGlyphUV[${numGlyphs}];
           uniform vec4 uGlyphPlane[${numGlyphs}];
 
-          const float DEPTH = 0.15;
+          const float TEXT_DEPTH = 0.15;
           const float PX_RANGE = 8.0;
           const float GLYPH_SIZE = 48.0;
-          const int MAX_STEPS = 64;
-          const float MAX_DIST = 10.0;
+          const int MAX_STEPS = 100;
+          const float MAX_DIST = 20.0;
           const float SURF_DIST = 0.001;
+
+          // ========== EPHEMERIS SDF ==========
+          ${processedEphemeris}
+          // ========== END EPHEMERIS SDF ==========
 
           mat3 rotateX(float a) {
             float s = sin(a), c = cos(a);
@@ -202,11 +216,64 @@ export default function Home() {
             return d;
           }
 
-          float sceneSdf(vec3 p) {
-            float d2d = textSdf2D(p.xy);
-            float dz = abs(p.z) - DEPTH;
-            vec2 w = vec2(d2d, dz);
+          // Rotation matrix for 2D (matches the Rot function in ephemeris)
+          mat2 Rot2D(float a) {
+            float s = sin(a);
+            float c = cos(a);
+            return mat2(c, -s, s, c);
+          }
+
+          float textOnInnerCylinder(vec3 p) {
+            // Transform to match the drill hole coordinate system
+            // From signet: p.y += 0.8
+            // From drillHole: p.y += bandPosY (3.7), then rotate
+            vec3 q = p;
+            q.y += 0.8;   // signet offset
+            q.y += 3.7;   // bandPosY offset
+            q.xy = Rot2D(PI/2.0) * q.xy;  // Rotate to align with cylinder axis
+
+            // Now cylinder axis is along Y, radius in XZ plane
+            // Cylinder radius is 3.9
+            float cylinderRadius = 3.9;
+
+            // Convert to cylindrical coordinates
+            float angle = atan(q.z, q.x);  // Angle around cylinder (-PI to PI)
+            float r = length(q.xz);        // Distance from cylinder axis
+            float h = q.y;                 // Height along cylinder axis
+
+            // Map cylindrical coords to 2D text coordinates
+            // angle -> text X (arc length), h -> text Y
+            float textScale = 0.4;  // Scale text to fit nicely
+            float textX = angle * cylinderRadius / textScale;  // Arc length scaled
+            float textY = (h + 0.3) / textScale;  // Center text vertically, + offset for top positioning
+
+            // Sample 2D text SDF
+            float d2d = textSdf2D(vec2(textX, textY));
+
+            // Extrude radially inward from cylinder surface
+            float textDepth = 0.15;  // How deep to engrave
+            float surfaceDist = cylinderRadius - r;  // Distance from inner surface (positive = inside cylinder)
+            float dr = surfaceDist - textDepth;      // Offset for engraving depth
+
+            // Combine 2D text with radial extrusion
+            vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
             return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+          }
+
+          float sceneSdf(vec3 p) {
+            // Ephemeris SDF (ring) - use as-is
+            float dEphemeris = ephemerisSdf(p);
+
+            // Text wrapped on inner cylinder surface
+            float dText = textOnInnerCylinder(p);
+
+            // Debug: show just ring
+            // return dEphemeris;
+            // Debug: show just text cylinder
+            // return dText;
+
+            // Engrave text into ring (subtract text from ring)
+            return max(dEphemeris, -dText);
           }
 
           vec3 calcNormal(vec3 p) {
@@ -235,7 +302,7 @@ export default function Home() {
 
             mat3 rot = rotateY(uRotation.y) * rotateX(uRotation.x);
 
-            vec3 ro = rot * vec3(0.0, 0.0, 2.5 / uZoom);
+            vec3 ro = rot * vec3(0.0, 0.0, 6.0 / uZoom);
             vec3 rd = rot * normalize(vec3(uv, -1.0));
 
             vec3 col = mix(vec3(0.1, 0.1, 0.15), vec3(0.2, 0.2, 0.25), uv.y + 0.5);
@@ -271,6 +338,9 @@ export default function Home() {
           }
         `;
 
+        // Log shader for debugging
+        console.log("Fragment shader length:", fragmentShader.length);
+
         const material = new THREE.ShaderMaterial({
           vertexShader,
           fragmentShader,
@@ -284,6 +354,15 @@ export default function Home() {
             uGlyphPlane: { value: glyphUniforms.map((g) => g.plane) },
           },
         });
+
+        // Check for shader compilation errors
+        renderer.compile(scene, camera);
+        const gl = renderer.getContext();
+        const program = (material as THREE.ShaderMaterial & { program?: { program: WebGLProgram } }).program;
+        if (program) {
+          const programInfo = gl.getProgramInfoLog(program.program);
+          if (programInfo) console.warn("Program info:", programInfo);
+        }
 
         const geometry = new THREE.PlaneGeometry(2, 2);
         const mesh = new THREE.Mesh(geometry, material);
@@ -317,7 +396,7 @@ export default function Home() {
         const handleWheel = (e: WheelEvent) => {
           e.preventDefault();
           zoom *= e.deltaY > 0 ? 0.95 : 1.05;
-          zoom = Math.max(0.5, Math.min(3.0, zoom));
+          zoom = Math.max(0.3, Math.min(5.0, zoom));
         };
 
         container.addEventListener("mousedown", handleMouseDown);
