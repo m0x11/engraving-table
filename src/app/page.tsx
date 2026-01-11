@@ -43,70 +43,70 @@ export default function Home() {
 
       // Build glyph lookup by character
       const glyphMap = new Map<string, GlyphData>();
-        for (const glyph of fontData.glyphs) {
-          const char = String.fromCharCode(glyph.unicode);
-          glyphMap.set(char, glyph);
-        }
+      for (const glyph of fontData.glyphs) {
+        const char = String.fromCharCode(glyph.unicode);
+        glyphMap.set(char, glyph);
+      }
 
-        const scene = new THREE.Scene();
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        container.appendChild(renderer.domElement);
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
 
-        // Load MSDF texture
-        const textureLoader = new THREE.TextureLoader();
-        const msdfTexture = textureLoader.load("/fonts/PPRightSerifMono-msdf.png");
-        msdfTexture.minFilter = THREE.LinearFilter;
-        msdfTexture.magFilter = THREE.LinearFilter;
-        msdfTexture.flipY = true;
+      // Load MSDF texture
+      const textureLoader = new THREE.TextureLoader();
+      const msdfTexture = textureLoader.load(
+        "/fonts/PPRightSerifMono-msdf.png"
+      );
+      msdfTexture.minFilter = THREE.LinearFilter;
+      msdfTexture.magFilter = THREE.LinearFilter;
+      msdfTexture.flipY = true;
 
-        // Build glyph uniform data for the text
-        const glyphUniforms: { uv: THREE.Vector4; plane: THREE.Vector4 }[] = [];
-        const validChars: string[] = [];
+      // Build glyph uniform data for the text
+      const glyphUniforms: { uv: THREE.Vector4; plane: THREE.Vector4 }[] = [];
+      const validChars: string[] = [];
 
-        for (const char of text) {
-          // Handle middle dot "·" by using period with vertical offset
-          const lookupChar = char === "·" ? "." : char;
-          const glyph = glyphMap.get(lookupChar);
+      for (const char of text) {
+        // Handle middle dot "·" by using period with vertical offset
+        const lookupChar = char === "·" ? "." : char;
+        const glyph = glyphMap.get(lookupChar);
 
-          if (glyph && glyph.atlasBounds && glyph.planeBounds) {
-            const uMin = glyph.atlasBounds.left / ATLAS_SIZE;
-            const uMax = glyph.atlasBounds.right / ATLAS_SIZE;
-            const vMin = glyph.atlasBounds.bottom / ATLAS_SIZE;
-            const vMax = glyph.atlasBounds.top / ATLAS_SIZE;
+        if (glyph && glyph.atlasBounds && glyph.planeBounds) {
+          const uMin = glyph.atlasBounds.left / ATLAS_SIZE;
+          const uMax = glyph.atlasBounds.right / ATLAS_SIZE;
+          const vMin = glyph.atlasBounds.bottom / ATLAS_SIZE;
+          const vMax = glyph.atlasBounds.top / ATLAS_SIZE;
 
-            // Calculate vertical offset for middle dot
-            // Period sits near baseline, shift it up to center vs uppercase/numbers
-            let verticalOffset = 0;
-            if (char === "·") {
-              const periodCenter = (glyph.planeBounds.bottom + glyph.planeBounds.top) / 2;
-              const targetCenter = 0.34; // Center of uppercase letters (~-0.09 to 0.78)
-              verticalOffset = targetCenter - periodCenter;
-            }
-
-            glyphUniforms.push({
-              uv: new THREE.Vector4(uMin, vMin, uMax, vMax),
-              plane: new THREE.Vector4(
-                glyph.planeBounds.left,
-                glyph.planeBounds.bottom + verticalOffset,
-                glyph.planeBounds.right,
-                glyph.planeBounds.top + verticalOffset
-              ),
-            });
-            validChars.push(char);
+          // Calculate vertical offset for middle dot
+          // Period sits near baseline, shift it up to center vs uppercase/numbers
+          let verticalOffset = 0;
+          if (char === "·") {
+            const periodCenter =
+              (glyph.planeBounds.bottom + glyph.planeBounds.top) / 2;
+            const targetCenter = 0.34; // Center of uppercase letters (~-0.09 to 0.78)
+            verticalOffset = targetCenter - periodCenter;
           }
-        }
 
-        const numGlyphs = glyphUniforms.length;
-        if (numGlyphs === 0) {
-          console.error("No valid glyphs found for text:", text);
-          return;
+          glyphUniforms.push({
+            uv: new THREE.Vector4(uMin, vMin, uMax, vMax),
+            plane: new THREE.Vector4(
+              glyph.planeBounds.left,
+              glyph.planeBounds.bottom + verticalOffset,
+              glyph.planeBounds.right,
+              glyph.planeBounds.top + verticalOffset
+            ),
+          });
+          validChars.push(char);
         }
+      }
 
-        // Generate shader with dynamic glyph count
-        const vertexShader = `
+      const numGlyphs = glyphUniforms.length;
+      const hasText = numGlyphs > 0;
+
+      // Generate shader with dynamic glyph count
+      const vertexShader = `
           varying vec2 vUv;
           void main() {
             vUv = uv;
@@ -114,8 +114,9 @@ export default function Home() {
           }
         `;
 
-        // Build the getGlyph function dynamically
-        let getGlyphCode = "";
+      // Build the getGlyph function dynamically
+      let getGlyphCode = "";
+      if (hasText) {
         for (let i = 0; i < numGlyphs; i++) {
           if (i === 0) {
             getGlyphCode += `if (idx == 0) { plane = uGlyphPlane[0]; uv = uGlyphUV[0]; }\n`;
@@ -123,14 +124,19 @@ export default function Home() {
             getGlyphCode += `        else if (idx == ${i}) { plane = uGlyphPlane[${i}]; uv = uGlyphUV[${i}]; }\n`;
           }
         }
+      }
 
-        // Build the textSdf2D function dynamically
-        let textSdfCode = "";
+      // Build the textSdf2D function dynamically
+      let textSdfCode = "";
+      if (hasText) {
         for (let i = 0; i < numGlyphs; i++) {
-          textSdfCode += `        d = min(d, glyphSdf2D(p - vec2(xStart + ${i.toFixed(1)} * advance, 0.0), ${i}));\n`;
+          textSdfCode += `        d = min(d, glyphSdf2D(p - vec2(xStart + ${i.toFixed(
+            1
+          )} * advance, 0.0), ${i}));\n`;
         }
+      }
 
-        const fragmentShader = `
+      const fragmentShader = `
           precision highp float;
 
           uniform vec2 uResolution;
@@ -139,8 +145,8 @@ export default function Home() {
           uniform vec3 uRotation;
           uniform float uZoom;
 
-          uniform vec4 uGlyphUV[${numGlyphs}];
-          uniform vec4 uGlyphPlane[${numGlyphs}];
+          ${hasText ? `uniform vec4 uGlyphUV[${numGlyphs}];` : ""}
+          ${hasText ? `uniform vec4 uGlyphPlane[${numGlyphs}];` : ""}
 
           const float TEXT_DEPTH = 0.15;
           const float PX_RANGE = 8.0;
@@ -181,6 +187,8 @@ export default function Home() {
           }
 
           void getGlyph(int idx, out vec4 plane, out vec4 uv) {
+            plane = vec4(0.0);
+            uv = vec4(0.0);
             ${getGlyphCode}
           }
 
@@ -243,7 +251,8 @@ export default function Home() {
 
             // Map cylindrical coords to 2D text coordinates
             // angle -> text X (arc length), h -> text Y
-            float textScale = 0.4;  // Scale text to fit nicely
+            float textScale = 1.0;  // Scale text to fit nicely
+            
             float textX = angle * cylinderRadius / textScale;  // Arc length scaled
             float textY = (h + 0.3) / textScale;  // Center text vertically, + offset for top positioning
 
@@ -338,102 +347,112 @@ export default function Home() {
           }
         `;
 
-        // Log shader for debugging
-        console.log("Fragment shader length:", fragmentShader.length);
+      // Log shader for debugging
+      console.log("Fragment shader length:", fragmentShader.length);
 
-        const material = new THREE.ShaderMaterial({
-          vertexShader,
-          fragmentShader,
-          uniforms: {
-            uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            uTime: { value: 0 },
-            uMsdfTexture: { value: msdfTexture },
-            uRotation: { value: new THREE.Vector3(0, 0, 0) },
-            uZoom: { value: 1.0 },
-            uGlyphUV: { value: glyphUniforms.map((g) => g.uv) },
-            uGlyphPlane: { value: glyphUniforms.map((g) => g.plane) },
+      const material = new THREE.ShaderMaterial({
+        vertexShader,
+        fragmentShader,
+        uniforms: {
+          uResolution: {
+            value: new THREE.Vector2(window.innerWidth, window.innerHeight),
           },
-        });
-
-        // Check for shader compilation errors
-        renderer.compile(scene, camera);
-        const gl = renderer.getContext();
-        const program = (material as THREE.ShaderMaterial & { program?: { program: WebGLProgram } }).program;
-        if (program) {
-          const programInfo = gl.getProgramInfoLog(program.program);
-          if (programInfo) console.warn("Program info:", programInfo);
-        }
-
-        const geometry = new THREE.PlaneGeometry(2, 2);
-        const mesh = new THREE.Mesh(geometry, material);
-        scene.add(mesh);
-
-        // Mouse controls
-        let isDragging = false;
-        let previousMouse = { x: 0, y: 0 };
-        let rotation = { x: 0.3, y: 0.5 };
-        let zoom = 1.0;
-
-        const handleMouseDown = (e: MouseEvent) => {
-          isDragging = true;
-          previousMouse = { x: e.clientX, y: e.clientY };
-        };
-
-        const handleMouseMove = (e: MouseEvent) => {
-          if (!isDragging) return;
-          const dx = e.clientX - previousMouse.x;
-          const dy = e.clientY - previousMouse.y;
-          rotation.y += dx * 0.005;
-          rotation.x += dy * 0.005;
-          rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotation.x));
-          previousMouse = { x: e.clientX, y: e.clientY };
-        };
-
-        const handleMouseUp = () => {
-          isDragging = false;
-        };
-
-        const handleWheel = (e: WheelEvent) => {
-          e.preventDefault();
-          zoom *= e.deltaY > 0 ? 0.95 : 1.05;
-          zoom = Math.max(0.3, Math.min(5.0, zoom));
-        };
-
-        container.addEventListener("mousedown", handleMouseDown);
-        window.addEventListener("mousemove", handleMouseMove);
-        window.addEventListener("mouseup", handleMouseUp);
-        container.addEventListener("wheel", handleWheel, { passive: false });
-
-        const handleResize = () => {
-          renderer.setSize(window.innerWidth, window.innerHeight);
-          material.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
-        };
-        window.addEventListener("resize", handleResize);
-
-        const animate = () => {
-          animationId = requestAnimationFrame(animate);
-          material.uniforms.uTime.value += 0.016;
-          material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
-          material.uniforms.uZoom.value = zoom;
-          renderer.render(scene, camera);
-        };
-        animate();
-
-        // Store cleanup function
-        (container as HTMLDivElement & { cleanup?: () => void }).cleanup = () => {
-          container.removeEventListener("mousedown", handleMouseDown);
-          window.removeEventListener("mousemove", handleMouseMove);
-          window.removeEventListener("mouseup", handleMouseUp);
-          container.removeEventListener("wheel", handleWheel);
-          window.removeEventListener("resize", handleResize);
-          cancelAnimationFrame(animationId);
-          container.removeChild(renderer.domElement);
-          renderer.dispose();
-        };
+          uTime: { value: 0 },
+          uMsdfTexture: { value: msdfTexture },
+          uRotation: { value: new THREE.Vector3(0, 0, 0) },
+          uZoom: { value: 1.0 },
+          uGlyphUV: { value: glyphUniforms.map((g) => g.uv) },
+          uGlyphPlane: { value: glyphUniforms.map((g) => g.plane) },
+        },
       });
 
+      // Check for shader compilation errors
+      renderer.compile(scene, camera);
+      const gl = renderer.getContext();
+      const program = (
+        material as THREE.ShaderMaterial & {
+          program?: { program: WebGLProgram };
+        }
+      ).program;
+      if (program) {
+        const programInfo = gl.getProgramInfoLog(program.program);
+        if (programInfo) console.warn("Program info:", programInfo);
+      }
+
+      const geometry = new THREE.PlaneGeometry(2, 2);
+      const mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      // Mouse controls
+      let isDragging = false;
+      let previousMouse = { x: 0, y: 0 };
+      let rotation = { x: 0.3, y: 0.5 };
+      let zoom = 1.0;
+
+      const handleMouseDown = (e: MouseEvent) => {
+        isDragging = true;
+        previousMouse = { x: e.clientX, y: e.clientY };
+      };
+
+      const handleMouseMove = (e: MouseEvent) => {
+        if (!isDragging) return;
+        const dx = e.clientX - previousMouse.x;
+        const dy = e.clientY - previousMouse.y;
+        rotation.y += dx * 0.005;
+        rotation.x += dy * 0.005;
+        rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotation.x));
+        previousMouse = { x: e.clientX, y: e.clientY };
+      };
+
+      const handleMouseUp = () => {
+        isDragging = false;
+      };
+
+      const handleWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        zoom *= e.deltaY > 0 ? 0.95 : 1.05;
+        zoom = Math.max(0.3, Math.min(5.0, zoom));
+      };
+
+      container.addEventListener("mousedown", handleMouseDown);
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+      container.addEventListener("wheel", handleWheel, { passive: false });
+
+      const handleResize = () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        material.uniforms.uResolution.value.set(
+          window.innerWidth,
+          window.innerHeight
+        );
+      };
+      window.addEventListener("resize", handleResize);
+
+      const animate = () => {
+        animationId = requestAnimationFrame(animate);
+        material.uniforms.uTime.value += 0.016;
+        material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
+        material.uniforms.uZoom.value = zoom;
+        renderer.render(scene, camera);
+      };
+      animate();
+
+      // Store cleanup function
+      (container as HTMLDivElement & { cleanup?: () => void }).cleanup = () => {
+        container.removeEventListener("mousedown", handleMouseDown);
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+        container.removeEventListener("wheel", handleWheel);
+        window.removeEventListener("resize", handleResize);
+        cancelAnimationFrame(animationId);
+        container.removeChild(renderer.domElement);
+        renderer.dispose();
+      };
+    });
+
     return () => {
-      const cleanup = (container as HTMLDivElement & { cleanup?: () => void }).cleanup;
+      const cleanup = (container as HTMLDivElement & { cleanup?: () => void })
+        .cleanup;
       if (cleanup) cleanup();
     };
   }, [text]);
