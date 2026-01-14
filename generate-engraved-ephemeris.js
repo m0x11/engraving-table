@@ -209,11 +209,10 @@ float textOnInnerCylinder(vec3 p) {
   float r = length(q.xz);        // Distance from cylinder axis
   float h = q.y;                 // Height along cylinder axis
 
-  // Map cylindrical coords to 2D text coordinates
-  // Flip text 180 degrees by negating both coordinates
+  // Map cylindrical coords to 2D text coordinates - rotate 180 degrees
   float textScale = 1.0;
-  float textX = -angle * cylinderRadius / textScale;  // Arc length scaled (negated to flip)
-  float textY = -(h + 0.3) / textScale;  // Center text vertically, flipped 180 degrees
+  float textX = -angle * cylinderRadius / textScale;
+  float textY = h / textScale + 0.34;  // +0.34 centers the glyphs
 
   // Sample 2D text SDF
   float d2d = textSdf2D(vec2(textX, textY));
