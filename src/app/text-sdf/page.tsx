@@ -152,8 +152,8 @@ export default function TextSdfPlayground() {
 
     Promise.all([
       fetch("/fonts/PPRightSerifMono-msdf.json").then((res) => res.json()),
-      fetch("/sdfs/ring.glsl").then((res) => res.text()),
-    ]).then(([fontData, ringGlsl]: [FontData, string]) => {
+      fetch("/sdfs/petals.glsl").then((res) => res.text()),
+    ]).then(([fontData, petalsGlsl]: [FontData, string]) => {
         const glyphMap = new Map<string, GlyphData>();
         for (const glyph of fontData.glyphs) {
           const char = String.fromCharCode(glyph.unicode);
@@ -205,9 +205,9 @@ export default function TextSdfPlayground() {
           const float MAX_DIST = 50.0;
           const float SURF_DIST = 0.001;
 
-          // ========== RING SDF ==========
-          ${ringGlsl}
-          // ========== END RING SDF ==========
+          // ========== PETALS SDF ==========
+          ${petalsGlsl}
+          // ========== END PETALS SDF ==========
 
           float median(vec3 v) {
             return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
@@ -270,7 +270,7 @@ export default function TextSdfPlayground() {
           }
 
           // ============================================================
-          // SCENE SDF - Combine text with ring SDF
+          // SCENE SDF - Combine text with petals SDF
           // ============================================================
           float sceneSdf(vec3 p) {
             float dText = textSdf(p, 0.1);
@@ -278,12 +278,11 @@ export default function TextSdfPlayground() {
             float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
             float t = sin(tri * PI * 0.5);
 
-            // Scale up coordinates for ring (it's designed for larger scale)
-            // and scale the distance back down
-            float ringScale = 5.0;
-            float dRing = ringSdf(p * ringScale, uTime) / ringScale;
+            // Scale coordinates for petals shape
+            float petalsScale = 1.0;
+            float dPetals = petalsSdf(p * petalsScale, uTime) / petalsScale;
 
-            return mix(dText, dRing, t);
+            return mix(dText, dPetals, t);
           }
 
           vec3 calcNormal(vec3 p) {
