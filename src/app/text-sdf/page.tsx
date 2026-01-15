@@ -150,9 +150,10 @@ export default function TextSdfPlayground() {
     const container = containerRef.current;
     let animationId: number;
 
-    fetch("/fonts/PPRightSerifMono-msdf.json")
-      .then((res) => res.json())
-      .then((fontData: FontData) => {
+    Promise.all([
+      fetch("/fonts/PPRightSerifMono-msdf.json").then((res) => res.json()),
+      fetch("/sdfs/ring.glsl").then((res) => res.text()),
+    ]).then(([fontData, ringGlsl]: [FontData, string]) => {
         const glyphMap = new Map<string, GlyphData>();
         for (const glyph of fontData.glyphs) {
           const char = String.fromCharCode(glyph.unicode);
@@ -204,25 +205,9 @@ export default function TextSdfPlayground() {
           const float MAX_DIST = 50.0;
           const float SURF_DIST = 0.001;
 
-          mat2 Rot(float a) {
-            float s = sin(a), c = cos(a);
-            return mat2(c, -s, s, c);
-          }
-
-          float sdCapsule(vec3 p, float r, float h) {
-            p.y -= clamp(p.y, 0.0, h);
-            return length(p) - r;
-          }
-
-          float sdTorusX(vec3 p, vec2 t) {
-            vec2 q = vec2(length(p.yz) - t.x, p.x);
-            return length(q) - t.y;
-          }
-
-          float smin(float a, float b, float k) {
-            float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-            return mix(b, a, h) - k * h * (1.0 - h);
-          }
+          // ========== RING SDF ==========
+          ${ringGlsl}
+          // ========== END RING SDF ==========
 
           float median(vec3 v) {
             return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
@@ -284,47 +269,21 @@ export default function TextSdfPlayground() {
             return max(d2d, dz);
           }
 
-          float starShape(vec3 p) {
-            float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-            float t = sin(tri * PI * 0.5);
-            t = 1.0;
-
-            p.xy *= 3.;
-            p.xz *= Rot(PI / 2.);
-            float pointAngle = atan(p.z, p.y);
-
-            float numSpokes = 8.0;
-            float spokeSpacing = 2.0 * PI / numSpokes;
-            float closestSpokeAngle = floor((pointAngle / spokeSpacing) + 0.5) * spokeSpacing;
-
-            vec3 spokePt = p;
-            spokePt.yz *= Rot(-closestSpokeAngle);
-
-            float rayMix = mix(0., 3.2, t);
-            float rayLength = rayMix;
-
-            float rayTMix = mix(-0.001, 0.0055, t);
-            float rayThickness = rayTMix;
-            float rays = sdCapsule(spokePt, rayThickness, rayLength);
-
-            vec3 torusPos = spokePt - vec3(0.0, 1.4, 0.0);
-            float tMix = mix(-0.5, 0.5, t);
-            float torus = sdTorusX(torusPos, vec2(tMix, 0.01));
-            float result = smin(rays, torus, 0.5);
-
-            return result;
-          }
-
           // ============================================================
-          // SCENE SDF - Combine text with other 3D shapes here!
+          // SCENE SDF - Combine text with ring SDF
           // ============================================================
           float sceneSdf(vec3 p) {
             float dText = textSdf(p, 0.1);
 
             float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
             float t = sin(tri * PI * 0.5);
-            float star = starShape(p);
-            return mix(star, dText, t);
+
+            // Scale up coordinates for ring (it's designed for larger scale)
+            // and scale the distance back down
+            float ringScale = 5.0;
+            float dRing = ringSdf(p * ringScale, uTime) / ringScale;
+
+            return mix(dText, dRing, t);
           }
 
           vec3 calcNormal(vec3 p) {
@@ -481,10 +440,22 @@ export default function TextSdfPlayground() {
         textScale,
         lineHeight
       );
-      sceneRef.current.material.uniforms.uFlatShading.value = flatShading ? 1.0 : 0.0;
-      sceneRef.current.material.uniforms.uOrthoView.value = orthoView ? 1.0 : 0.0;
+      sceneRef.current.material.uniforms.uFlatShading.value = flatShading
+        ? 1.0
+        : 0.0;
+      sceneRef.current.material.uniforms.uOrthoView.value = orthoView
+        ? 1.0
+        : 0.0;
     }
-  }, [text, textScale, lineHeight, flatShading, orthoView, sceneReady, updateTextUniforms]);
+  }, [
+    text,
+    textScale,
+    lineHeight,
+    flatShading,
+    orthoView,
+    sceneReady,
+    updateTextUniforms,
+  ]);
 
   return (
     <div className="relative w-screen h-screen">
