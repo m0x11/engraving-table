@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 
 const ATLAS_SIZE = 344;
+const MAX_GLYPHS = 128;
 
 type GlyphData = {
   unicode: number;
@@ -17,46 +18,79 @@ type FontData = {
   glyphs: GlyphData[];
 };
 
+type SceneRefs = {
+  material: THREE.ShaderMaterial;
+  glyphMap: Map<string, GlyphData>;
+};
+
 export default function TextSdfPlayground() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [text, setText] = useState("Hello");
+  const sceneRef = useRef<SceneRefs | null>(null);
+  const [text, setText] = useState("Hello\nWorld");
+  const [textScale, setTextScale] = useState(1.0);
+  const [lineHeight, setLineHeight] = useState(0.9);
+  const [flatShading, setFlatShading] = useState(false);
+  const [orthoView, setOrthoView] = useState(false);
+  const [sceneReady, setSceneReady] = useState(false);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // Update glyph uniforms without rebuilding shader
+  const updateTextUniforms = useCallback(
+    (
+      material: THREE.ShaderMaterial,
+      glyphMap: Map<string, GlyphData>,
+      inputText: string,
+      scale: number,
+      lh: number
+    ) => {
+      const glyphUVs: THREE.Vector4[] = [];
+      const glyphPlanes: THREE.Vector4[] = [];
+      const glyphPositions: THREE.Vector2[] = [];
 
-    const container = containerRef.current;
-    let animationId: number;
+      const advance = 0.52 * scale;
+      const lineHeightVal = lh * scale;
 
-    fetch("/fonts/PPRightSerifMono-msdf.json")
-      .then((res) => res.json())
-      .then((fontData: FontData) => {
-        // Build glyph lookup by character
-        const glyphMap = new Map<string, GlyphData>();
-        for (const glyph of fontData.glyphs) {
-          const char = String.fromCharCode(glyph.unicode);
-          glyphMap.set(char, glyph);
+      // Split into lines
+      const lines = inputText.split("\n");
+      let maxLineWidth = 0;
+      const lineWidths: number[] = [];
+
+      // Calculate line widths for centering
+      for (const line of lines) {
+        let width = 0;
+        for (const char of line) {
+          if (char === " ") {
+            width += advance;
+            continue;
+          }
+          const lookupChar = char === "·" ? "." : char;
+          const glyph = glyphMap.get(lookupChar);
+          if (glyph && glyph.atlasBounds && glyph.planeBounds) {
+            width += advance;
+          }
         }
+        lineWidths.push(width);
+        maxLineWidth = Math.max(maxLineWidth, width);
+      }
 
-        const scene = new THREE.Scene();
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        container.appendChild(renderer.domElement);
+      // Total height for vertical centering
+      const totalHeight = lines.length * lineHeightVal;
+      const startY = totalHeight / 2 - lineHeightVal / 2;
 
-        // Load MSDF texture
-        const textureLoader = new THREE.TextureLoader();
-        const msdfTexture = textureLoader.load(
-          "/fonts/PPRightSerifMono-msdf.png"
-        );
-        msdfTexture.minFilter = THREE.LinearFilter;
-        msdfTexture.magFilter = THREE.LinearFilter;
-        msdfTexture.flipY = true;
+      // Build glyph data
+      let lineIdx = 0;
+      for (const line of lines) {
+        const lineWidth = lineWidths[lineIdx];
+        let x = -lineWidth / 2 + advance * 0.25;
+        const y = startY - lineIdx * lineHeightVal;
 
-        // Build glyph uniform data for the text
-        const glyphUniforms: { uv: THREE.Vector4; plane: THREE.Vector4 }[] = [];
+        for (const char of line) {
+          if (glyphUVs.length >= MAX_GLYPHS) break;
 
-        for (const char of text) {
+          if (char === " ") {
+            x += advance;
+            continue;
+          }
+
           const lookupChar = char === "·" ? "." : char;
           const glyph = glyphMap.get(lookupChar);
 
@@ -74,20 +108,71 @@ export default function TextSdfPlayground() {
               verticalOffset = targetCenter - periodCenter;
             }
 
-            glyphUniforms.push({
-              uv: new THREE.Vector4(uMin, vMin, uMax, vMax),
-              plane: new THREE.Vector4(
-                glyph.planeBounds.left,
-                glyph.planeBounds.bottom + verticalOffset,
-                glyph.planeBounds.right,
-                glyph.planeBounds.top + verticalOffset
-              ),
-            });
+            glyphUVs.push(new THREE.Vector4(uMin, vMin, uMax, vMax));
+            glyphPlanes.push(
+              new THREE.Vector4(
+                glyph.planeBounds.left * scale,
+                (glyph.planeBounds.bottom + verticalOffset) * scale,
+                glyph.planeBounds.right * scale,
+                (glyph.planeBounds.top + verticalOffset) * scale
+              )
+            );
+            glyphPositions.push(new THREE.Vector2(x, y));
+
+            x += advance;
           }
         }
+        lineIdx++;
+      }
 
-        const numGlyphs = glyphUniforms.length;
-        const hasText = numGlyphs > 0;
+      // Pad arrays to MAX_GLYPHS
+      while (glyphUVs.length < MAX_GLYPHS) {
+        glyphUVs.push(new THREE.Vector4(0, 0, 0, 0));
+        glyphPlanes.push(new THREE.Vector4(0, 0, 0, 0));
+        glyphPositions.push(new THREE.Vector2(0, 0));
+      }
+
+      material.uniforms.uGlyphUV.value = glyphUVs;
+      material.uniforms.uGlyphPlane.value = glyphPlanes;
+      material.uniforms.uGlyphPos.value = glyphPositions;
+      material.uniforms.uNumGlyphs.value = Math.min(
+        inputText.replace(/[\s\n]/g, "").length,
+        MAX_GLYPHS
+      );
+    },
+    []
+  );
+
+  // Initialize scene once
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const container = containerRef.current;
+    let animationId: number;
+
+    fetch("/fonts/PPRightSerifMono-msdf.json")
+      .then((res) => res.json())
+      .then((fontData: FontData) => {
+        const glyphMap = new Map<string, GlyphData>();
+        for (const glyph of fontData.glyphs) {
+          const char = String.fromCharCode(glyph.unicode);
+          glyphMap.set(char, glyph);
+        }
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const textureLoader = new THREE.TextureLoader();
+        const msdfTexture = textureLoader.load(
+          "/fonts/PPRightSerifMono-msdf.png"
+        );
+        msdfTexture.minFilter = THREE.LinearFilter;
+        msdfTexture.magFilter = THREE.LinearFilter;
+        msdfTexture.flipY = true;
 
         const vertexShader = `
           varying vec2 vUv;
@@ -97,28 +182,6 @@ export default function TextSdfPlayground() {
           }
         `;
 
-        // Build the getGlyph function dynamically
-        let getGlyphCode = "";
-        if (hasText) {
-          for (let i = 0; i < numGlyphs; i++) {
-            if (i === 0) {
-              getGlyphCode += `if (idx == 0) { plane = uGlyphPlane[0]; uv = uGlyphUV[0]; }\n`;
-            } else {
-              getGlyphCode += `        else if (idx == ${i}) { plane = uGlyphPlane[${i}]; uv = uGlyphUV[${i}]; }\n`;
-            }
-          }
-        }
-
-        // Build the textSdf2D function dynamically
-        let textSdfCode = "";
-        if (hasText) {
-          for (let i = 0; i < numGlyphs; i++) {
-            textSdfCode += `        d = min(d, glyphSdf2D(p - vec2(xStart + ${i.toFixed(
-              1
-            )} * advance, 0.0), ${i}));\n`;
-          }
-        }
-
         const fragmentShader = `
           precision highp float;
 
@@ -127,8 +190,12 @@ export default function TextSdfPlayground() {
           uniform sampler2D uMsdfTexture;
           uniform float uScale;
 
-          ${hasText ? `uniform vec4 uGlyphUV[${numGlyphs}];` : ""}
-          ${hasText ? `uniform vec4 uGlyphPlane[${numGlyphs}];` : ""}
+          uniform vec4 uGlyphUV[${MAX_GLYPHS}];
+          uniform vec4 uGlyphPlane[${MAX_GLYPHS}];
+          uniform vec2 uGlyphPos[${MAX_GLYPHS}];
+          uniform int uNumGlyphs;
+          uniform float uFlatShading;
+          uniform float uOrthoView;
 
           const float PX_RANGE = 8.0;
           const float GLYPH_SIZE = 48.0;
@@ -166,27 +233,21 @@ export default function TextSdfPlayground() {
               mix(uvBounds.x, uvBounds.z, localUV.x),
               mix(uvBounds.y, uvBounds.w, localUV.y)
             );
-
             vec3 msdf = texture2D(uMsdfTexture, atlasUV).rgb;
             float sd = median(msdf);
-
             float pxDist = PX_RANGE * (0.5 - sd);
             return pxDist / GLYPH_SIZE;
           }
 
-          void getGlyph(int idx, out vec4 plane, out vec4 uv) {
-            plane = vec4(0.0);
-            uv = vec4(0.0);
-            ${getGlyphCode}
-          }
-
           float glyphSdf2D(vec2 p, int idx) {
-            vec4 plane, uv;
-            getGlyph(idx, plane, uv);
+            vec4 plane = uGlyphPlane[idx];
+            vec4 uv = uGlyphUV[idx];
 
             vec2 planeMin = plane.xy;
             vec2 planeMax = plane.zw;
             vec2 planeSize = planeMax - planeMin;
+
+            if (planeSize.x < 0.001) return 1000.0;
 
             vec2 localUV = (p - planeMin) / planeSize;
 
@@ -206,17 +267,16 @@ export default function TextSdfPlayground() {
           // ============================================================
           float textSdf2D(vec2 p) {
             float d = 1000.0;
-            float advance = 0.52;
-            float totalWidth = ${numGlyphs.toFixed(1)} * advance;
-            float xStart = -totalWidth * 0.5 + advance * 0.25;
-
-            ${textSdfCode}
-
+            for (int i = 0; i < ${MAX_GLYPHS}; i++) {
+              if (i >= uNumGlyphs) break;
+              vec2 pos = uGlyphPos[i];
+              d = min(d, glyphSdf2D(p - pos, i));
+            }
             return d;
           }
 
           // ============================================================
-          // TEXT SDF 3D - Extruded text (use p.xy for the text, p.z for depth)
+          // TEXT SDF 3D - Extruded text
           // ============================================================
           float textSdf(vec3 p, float depth) {
             float d2d = textSdf2D(p.xy);
@@ -224,64 +284,47 @@ export default function TextSdfPlayground() {
             return max(d2d, dz);
           }
 
-          float starShape(vec3 p) 
-          {
-             
-              float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-              float t = sin(tri * PI * 0.5);
-              t = 1.0;
-             
-              p.xy *= 3.;
-              p.xz*= Rot(PI / 2.);
-              //p.yz *= Rot(PI / 2.2);
-              float pointAngle = atan(p.z, p.y);
+          float starShape(vec3 p) {
+            float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+            float t = sin(tri * PI * 0.5);
+            t = 1.0;
 
-              float numSpokes = 8.0;
-              float spokeSpacing = 2.0 * PI / numSpokes;
-              float closestSpokeAngle = floor((pointAngle / spokeSpacing) + 0.5) * spokeSpacing;
-              
-              vec3 spokePt = p;
-              spokePt.yz *= Rot(-closestSpokeAngle);
-              
-              // Create the basic ray
-              float rayMix = mix(0., 3.2, t);
-              float rayLength = rayMix;
-              
-              float rayTMix = mix(-0.001, 0.0055, t);
-              float rayThickness = rayTMix;
-              float rays = sdCapsule(spokePt, rayThickness, rayLength);
-              
-              // Torus at the positive end
-              vec3 torusPos = spokePt - vec3(0.0, 1.4, 0.0);
+            p.xy *= 3.;
+            p.xz *= Rot(PI / 2.);
+            float pointAngle = atan(p.z, p.y);
 
-              float tMix = mix(-0.5, 0.5, t);
-              float torus = sdTorusX(torusPos, vec2(tMix, 0.01));
-              float result = smin(rays, torus, 0.5);
+            float numSpokes = 8.0;
+            float spokeSpacing = 2.0 * PI / numSpokes;
+            float closestSpokeAngle = floor((pointAngle / spokeSpacing) + 0.5) * spokeSpacing;
 
-              return result;
+            vec3 spokePt = p;
+            spokePt.yz *= Rot(-closestSpokeAngle);
+
+            float rayMix = mix(0., 3.2, t);
+            float rayLength = rayMix;
+
+            float rayTMix = mix(-0.001, 0.0055, t);
+            float rayThickness = rayTMix;
+            float rays = sdCapsule(spokePt, rayThickness, rayLength);
+
+            vec3 torusPos = spokePt - vec3(0.0, 1.4, 0.0);
+            float tMix = mix(-0.5, 0.5, t);
+            float torus = sdTorusX(torusPos, vec2(tMix, 0.01));
+            float result = smin(rays, torus, 0.5);
+
+            return result;
           }
 
           // ============================================================
           // SCENE SDF - Combine text with other 3D shapes here!
-          // p is the 3D point being sampled
           // ============================================================
           float sceneSdf(vec3 p) {
-            // Get the 3D extruded text SDF (depth = 0.1)
             float dText = textSdf(p, 0.1);
-
-            // === ADD YOUR OWN 3D SHAPES HERE ===
-            // Examples:
-            // float dSphere = length(p) - 0.5;                    // Sphere
-            // float dBox = length(max(abs(p) - vec3(0.3), 0.0));  // Box
-            // float dUnion = min(dText, dSphere);                 // Union
-            // float dSubtract = max(dText, -dSphere);             // Subtract
-            // float dIntersect = max(dText, dSphere);             // Intersection
 
             float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
             float t = sin(tri * PI * 0.5);
             float star = starShape(p);
             return mix(star, dText, t);
-            //return star;
           }
 
           vec3 calcNormal(vec3 p) {
@@ -309,46 +352,64 @@ export default function TextSdfPlayground() {
             vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
             uv /= uScale;
 
-            // Fixed camera - straight on
-            vec3 ro = vec3(0.0, 0.0, 3.0);  // Camera position
-            vec3 rd = normalize(vec3(uv, -1.0));  // Ray direction
+            vec3 ro, rd;
+            if (uOrthoView > 0.5) {
+              // Orthographic - parallel rays
+              ro = vec3(uv, 3.0);
+              rd = vec3(0.0, 0.0, -1.0);
+            } else {
+              // Perspective - rays diverge from center
+              ro = vec3(0.0, 0.0, 3.0);
+              rd = normalize(vec3(uv, -1.0));
+            }
 
-            // White background
             vec3 col = vec3(1.0);
 
             float t = rayMarch(ro, rd);
 
             if (t > 0.0) {
-              vec3 p = ro + rd * t;
-              vec3 n = calcNormal(p);
+              if (uFlatShading > 0.5) {
+                // Pure black, no lighting
+                col = vec3(0.0);
+              } else {
+                vec3 p = ro + rd * t;
+                vec3 n = calcNormal(p);
 
-              // Simple lighting
-              vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-              float diff = max(dot(n, lightDir), 0.0);
-              float amb = 0.2;
+                vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+                float diff = max(dot(n, lightDir), 0.0);
+                float amb = 0.2;
 
-              // Black material
-              col = vec3(0.0) + vec3(1.0) * (amb + diff * 0.8);
-              col = vec3(1.0) - col;  // Invert for black on white
+                col = vec3(0.0) + vec3(1.0) * (amb + diff * 0.8);
+                col = vec3(1.0) - col;
+              }
             }
 
             gl_FragColor = vec4(col, 1.0);
           }
         `;
 
-        const uniforms: Record<string, { value: unknown }> = {
+        // Initialize uniform arrays
+        const emptyVec4Array = Array(MAX_GLYPHS)
+          .fill(null)
+          .map(() => new THREE.Vector4(0, 0, 0, 0));
+        const emptyVec2Array = Array(MAX_GLYPHS)
+          .fill(null)
+          .map(() => new THREE.Vector2(0, 0));
+
+        const uniforms = {
           uResolution: {
             value: new THREE.Vector2(window.innerWidth, window.innerHeight),
           },
           uTime: { value: 0 },
           uMsdfTexture: { value: msdfTexture },
           uScale: { value: 1.0 },
+          uGlyphUV: { value: [...emptyVec4Array] },
+          uGlyphPlane: { value: [...emptyVec4Array] },
+          uGlyphPos: { value: [...emptyVec2Array] },
+          uNumGlyphs: { value: 0 },
+          uFlatShading: { value: 0.0 },
+          uOrthoView: { value: 0.0 },
         };
-
-        if (hasText) {
-          uniforms.uGlyphUV = { value: glyphUniforms.map((g) => g.uv) };
-          uniforms.uGlyphPlane = { value: glyphUniforms.map((g) => g.plane) };
-        }
 
         const material = new THREE.ShaderMaterial({
           vertexShader,
@@ -356,11 +417,14 @@ export default function TextSdfPlayground() {
           uniforms,
         });
 
+        // Store refs for text updates
+        sceneRef.current = { material, glyphMap };
+        setSceneReady(true);
+
         const geometry = new THREE.PlaneGeometry(2, 2);
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
 
-        // Scroll to zoom
         let scale = 1.0;
         const handleWheel = (e: WheelEvent) => {
           e.preventDefault();
@@ -391,8 +455,12 @@ export default function TextSdfPlayground() {
             container.removeEventListener("wheel", handleWheel);
             window.removeEventListener("resize", handleResize);
             cancelAnimationFrame(animationId);
-            container.removeChild(renderer.domElement);
+            if (container.contains(renderer.domElement)) {
+              container.removeChild(renderer.domElement);
+            }
             renderer.dispose();
+            sceneRef.current = null;
+            setSceneReady(false);
           };
       });
 
@@ -401,21 +469,83 @@ export default function TextSdfPlayground() {
         .cleanup;
       if (cleanup) cleanup();
     };
-  }, [text]);
+  }, []);
+
+  // Update text uniforms when text/scale/lineHeight changes
+  useEffect(() => {
+    if (sceneRef.current && sceneReady) {
+      updateTextUniforms(
+        sceneRef.current.material,
+        sceneRef.current.glyphMap,
+        text,
+        textScale,
+        lineHeight
+      );
+      sceneRef.current.material.uniforms.uFlatShading.value = flatShading ? 1.0 : 0.0;
+      sceneRef.current.material.uniforms.uOrthoView.value = orthoView ? 1.0 : 0.0;
+    }
+  }, [text, textScale, lineHeight, flatShading, orthoView, sceneReady, updateTextUniforms]);
 
   return (
     <div className="relative w-screen h-screen">
       <div ref={containerRef} className="w-full h-full" />
-      <div className="absolute top-4 left-4 bg-black/80 p-4 rounded-lg text-white">
+      <div className="absolute top-4 left-4 bg-black/80 p-4 rounded-lg text-white max-w-sm">
         <div className="mb-2 text-sm text-gray-300">Text SDF Playground</div>
-        <input
-          type="text"
+        <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          className="bg-white/10 text-white px-3 py-2 rounded border border-white/20 outline-none focus:border-white/50 w-64"
-          placeholder="Enter text..."
+          className="bg-white/10 text-white px-3 py-2 rounded border border-white/20 outline-none focus:border-white/50 w-full h-24 resize-none"
+          placeholder="Enter text (supports line breaks)..."
         />
-        <div className="mt-2 text-xs text-gray-400">Scroll to zoom</div>
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-400 w-20">Text Scale</label>
+            <input
+              type="range"
+              min="0.1"
+              max="3"
+              step="0.05"
+              value={textScale}
+              onChange={(e) => setTextScale(parseFloat(e.target.value))}
+              className="flex-1"
+            />
+            <span className="text-xs w-8">{textScale.toFixed(1)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-400 w-20">Line Height</label>
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.05"
+              value={lineHeight}
+              onChange={(e) => setLineHeight(parseFloat(e.target.value))}
+              className="flex-1"
+            />
+            <span className="text-xs w-8">{lineHeight.toFixed(1)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-400 w-20">Flat Black</label>
+            <input
+              type="checkbox"
+              checked={flatShading}
+              onChange={(e) => setFlatShading(e.target.checked)}
+              className="w-4 h-4"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-400 w-20">Ortho View</label>
+            <input
+              type="checkbox"
+              checked={orthoView}
+              onChange={(e) => setOrthoView(e.target.checked)}
+              className="w-4 h-4"
+            />
+          </div>
+        </div>
+        <div className="mt-2 text-xs text-gray-400">
+          Scroll to zoom · Max {MAX_GLYPHS} chars
+        </div>
       </div>
     </div>
   );
