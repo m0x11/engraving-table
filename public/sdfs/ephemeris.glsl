@@ -155,29 +155,27 @@ float getOrbitalPeriod(int planetID) {
 #define PLANET_SCALE 0.5
 
 float getPlanetRadius(int index) {
+
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
     // -1 => Sun
     if (index == -1) {
         return 0.0; // star radius
     }
-    // 0..7 => Mercury..Neptune
-    if (index == 0) return 0.32; // Mercury
-    else if (index == 1) return 0.32; // Venus
-    else if (index == 2) return 0.32; // Earth
-    else if (index == 3) return 0.32; // Mars
-    else if (index == 4) return 0.32; // Jupiter
-    else if (index == 5) return 0.32; // Saturn
-    else if (index == 6) return 0.32; // Uranus
-    else if (index == 7) return 0.32; // Neptune
-    return 0.0;
+    return mix(-0.5, .32, t);
 }
 
 //////////////////////////////////////////////////////////
 // Trail thickness (similar to second version but no arrays)
 //////////////////////////////////////////////////////////
+
+
+// DEMO SPECIFIC
 float getTrailThickness(int planetID) {
-    // Example from second version: Mercury=0.01, all else=0.04, etc.
-    //if (planetID == EARTH)   return 0.;
-    return 0.04;
+    //return 0.04;
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    return mix(-0.011, 0.004, t);
 }
 
 //////////////////////////////////////////////////////////
@@ -325,7 +323,7 @@ float getPlanetsDistance(vec3 p, float unixTime) {
     
     // Check distance to each planet
     for(int i = 0; i < 8; i++) {
-        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 0.6);
+        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 1.0);
         minDist = min(minDist, planetDist);
         
         // Add Moon if this is Earth
@@ -350,7 +348,7 @@ float getOuterPlanetsDistance(vec3 p, float unixTime) {
     
     // Check distance to each planet
     for(int i = 4; i < 8; i++) {
-        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 0.6);
+        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 1.0);
         minDist = min(minDist, planetDist);
     }
     
@@ -378,7 +376,7 @@ float getSmallPlanetsDistance(vec3 p, float unixTime) {
     // Check distance to each planet
     for(int i = 0; i < 5; i++) {
         if (i == EARTH) continue;
-        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 0.6);
+        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 1.0);
         minDist = min(minDist, planetDist);
     }
     
@@ -679,6 +677,9 @@ float stamp(vec3 p) {
 // Final Scene Distance
 //////////////////////////////////////////////////////////
 
+// default 
+
+/*
 float mapScene(vec3 p) {
     // targetDate is set externally (via uniform in viewer, or hardcoded for mesh generation)
 
@@ -768,9 +769,265 @@ float mapScene(vec3 p) {
     
     return finalDist;
 }
+*/
 
+// demo
+
+
+float showMeStar(vec3 p, float targetDate) 
+{
+    // --- Apply the same local transform to p ---
+    p.xy *= Rot(PI / 2.0);
+    p.yz *= Rot(PI / 2.0);
+
+    // Spoke angle in the *local yz-plane*
+    float pointAngle = atan(p.z, p.y);
+    
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    
+    //float numSpokes = mix(111., 8., t);
+    float numSpokes = 8.;
+    float spokeSpacing = 2.0 * PI / numSpokes;
+    float closestSpokeAngle = floor((pointAngle / spokeSpacing) + 0.5) * spokeSpacing;
+    
+    //-----------------------------------------------------------
+    //     Transform Earth and Neptune to the same local yz-plane!
+    //-----------------------------------------------------------
+    // Earth positions
+    vec3 earthPosWorld = getPlanetPosition(targetDate, EARTH);
+    earthPosWorld.xy *= Rot(PI / 2.0);
+    earthPosWorld.yz *= Rot(PI);
+    float earthAngleLocal = atan(earthPosWorld.z, earthPosWorld.y);
+    
+    // Neptune positions
+    vec3 neptunePosWorld = getPlanetPosition(targetDate, NEPTUNE);
+    neptunePosWorld.xy *= Rot(PI / 2.0);
+    neptunePosWorld.yz *= Rot(PI);
+    float neptuneAngleLocal = atan(neptunePosWorld.z, neptunePosWorld.y);
+    
+    // Compare angles in the correct space
+    float earthAngularDist = PI - abs(PI - abs(
+        mod(closestSpokeAngle - earthAngleLocal, 2.0*PI)
+    ));
+    
+    float neptuneAngularDist = PI - abs(PI - abs(
+        mod(closestSpokeAngle - neptuneAngleLocal, 2.0*PI)
+    ));
+    
+    // Configuration for masking spheres
+    float maskingSphereRadius = 0.4;    // Radius of the masking spheres
+    float earthMaskOffset = 1.0;        // Distance for Earth mask
+    float neptuneMaskOffset = 3.0;      // Distance for Neptune mask
+    
+    vec3 spokePt = p;
+    spokePt.yz *= Rot(-closestSpokeAngle);
+    
+    // Determine if we're on a 0 or 90 degree spoke (x or y axis aligned)
+    // We need to check if closestSpokeAngle is approximately 0, PI/2, PI, or 3PI/2
+    float angleModPI2 = mod(closestSpokeAngle, PI/2.0);
+    bool isAxisAligned = angleModPI2 < 0.01 || angleModPI2 > (PI/2.0 - 0.01);
+    
+    // Create the basic ray with variable thickness
+
+    float rayLength = mix(0., 3.16, t);
+    //float rayThickness = isAxisAligned ? 0.0033 : 0.0048;
+    float rayThickness = mix(0., 0.004, t);
+    float rays = sdCapsule(spokePt, rayThickness, rayLength);
+    
+    // If we're near Earth, create a masking sphere
+    /*
+    if (earthAngularDist < PI/8.) {
+        vec3 maskPos = vec3(0.0, earthMaskOffset, 0.0);
+        maskPos.yz *= Rot(closestSpokeAngle);
+        float maskingSphere = length(p - maskPos) - maskingSphereRadius;
+        rays = max(-maskingSphere, rays);
+    }*/
+    
+    // If we're near Neptune, create another masking sphere
+
+    return rays;
+}
+
+
+float showMeHow(vec3 p) {
+
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    
+
+    p.y -= 1.;
+    //p.yz *= Rot(-PI / 4.);
+    //p.yz *= Rot(PI / 3.);
+    //float t = 0.;
+    //float targetDate = 193323096000.; // Midnight 2/29/8096
+    //float targetDate = 800021340.; // 5:09 5/9/1995
+    //float targetDate = 942347471.; // 11:11 11/11/1999
+    //float targetDate = 1735761600.; // Midnight 1/1/2025
+    //float targetDate = 2175761600.;
+    //float targetDate = 1762888271.; // 11 11 2025
+    //float targetDate = 200992043471.; // 03 09 8339
+    
+    
+    //targetDate += iTime * 3200000.;
+
+    //float targetDate = mix(902188183., 922188183., t);
+    //float targetDate = mix(972347471., 942347471., t); 
+    float internalTargetDate = mix(200992043471., 	200928971471., t); 
+    
+    // 1) Transform to bowl space
+    vec3 transformedP = transformToBowl(p);
+    //vec3 transformedP = p;
+    vec3 starP = transformedP;
+    starP.xz *= Rot(PI / 2.);
+    float dStar = showMeStar(starP, targetDate);
+    
+    transformedP.xz *= Rot(PI / 2.);
+    
+    
+    // 2) Distance to all planets (incl. Moon & Sun)
+    //float dPlanets = getPlanetsDistance(transformedP, targetDate);
+    float dOuterPlanets = getOuterPlanetsDistance(transformedP, internalTargetDate);
+    float dMoonSphere = getMoonDistance(transformedP, internalTargetDate);
+    float dEarthSphere = getEarthDistance(transformedP, internalTargetDate);
+    float dSmallPlanets = getSmallPlanetsDistance(transformedP, internalTargetDate);
+    
+    // Some orbit arcs (Mercury, Earth, Neptune, plus the rest)
+    float dMerc = getPlanetOrbitPathDistance(transformedP, MERCURY);
+    float dVenus = getPlanetOrbitPathDistance(transformedP, VENUS);
+    float dEarth = getPlanetOrbitPathDistance(transformedP, EARTH);
+    float dNept = getPlanetOrbitPathDistance(transformedP, NEPTUNE);
+    float dStarOrbit         = getStarOrbitPathDistance(transformedP);
+    
+    // Remaining orbits: (Mars=3, Jupiter=4, Saturn=5, Uranus=6)
+    float dOthers = 1e10;
+    for(int i = 3; i <= 6; i++) {
+        float d = getPlanetOrbitPathDistance(transformedP, i);
+        if (d < dOthers) {
+            dOthers = d;
+        }
+    }
+    
+    // The signet ring geometry, plus bowl
+    float dSignet = signet(p);
+    float dBasinSphere = getBowlSphereDistance(p);
+    
+    // Star shape in bowl space
+    transformedP.xz *= Rot(PI / 2.);
+
+
+    float garnish = 1e10;
+
+    garnish = smin(dStar,   dStarOrbit,  mix(0., 0.16, t));
+    
+    float garn = mix(0.4, 0.0, t);
+    
+    garnish       = smin(garnish, dMerc, garn);
+    garnish       = smin(garnish, dVenus, garn);
+    garnish       = smin(garnish, dEarth,  garn);
+    garnish       = smin(garnish, dNept,   0.2);
+    garnish       = smin(garnish, dOthers, garn);
+
+
+    float outers = directionalSminY(dOuterPlanets, garnish, .016, p);
+    float small = directionalSminY(dSmallPlanets, garnish, .01, p);
+    float earth = directionalSminY(dEarthSphere, garnish, .01, p);
+    float moon = dMoonSphere;
+    
+    float planetsPlusGarnish = min(earth, min(outers, small));
+    float finalDist = planetsPlusGarnish;    
+    finalDist = max(-moon, finalDist);
+
+    return finalDist;
+}
+
+float mapScene(vec3 p) {
+    // targetDate is set externally (via uniform in viewer, or hardcoded for mesh generation)
+
+    float show = showMeHow(p);
+    
+    // 1) Transform to bowl space
+    vec3 transformedP = transformToBowl(p);
+    transformedP.xz *= Rot(-PI / 2.);
+    
+     transformedP.y /= DEPTH;
+    
+    // 2) Distance to all planets (incl. Moon & Sun)
+    //float dPlanets = getPlanetsDistance(transformedP, targetDate);
+    float dOuterPlanets = getOuterPlanetsDistance(transformedP, targetDate);
+    float dMoonSphere = getMoonDistance(transformedP, targetDate);
+    float dEarthSphere = getEarthDistance(transformedP, targetDate);
+    float dSmallPlanets = getSmallPlanetsDistance(transformedP, targetDate);
+    
+    // Some orbit arcs (Mercury, Earth, Neptune, plus the rest)
+    float dMerc = getPlanetOrbitPathDistance(transformedP, MERCURY);
+    float dVenus = getPlanetOrbitPathDistance(transformedP, VENUS);
+    float dEarth = getPlanetOrbitPathDistance(transformedP, EARTH);
+    float dNept = getPlanetOrbitPathDistance(transformedP, NEPTUNE);
+    float dStarOrbit         = getStarOrbitPathDistance(transformedP);
+    
+    // Remaining orbits: (Mars=3, Jupiter=4, Saturn=5, Uranus=6)
+    float dOthers = 1e10;
+    for(int i = 3; i <= 6; i++) {
+        float d = getPlanetOrbitPathDistance(transformedP, i);
+        if (d < dOthers) {
+            dOthers = d;
+        }
+    }
+    
+    // The signet ring geometry, plus bowl
+    float dSignet = signet(p);
+    float dBasinSphere = getBowlSphereDistance(p);
+    float dRing = max(-dBasinSphere, dSignet);
+    
+    // Star shape in bowl space
+    transformedP.xz *= Rot(PI / 2.);
+    float dStar = starShape(transformedP, targetDate);
+    
+
+    float garnish = 1e10;
+    garnish = smin(dStar,   dStarOrbit,  0.18);
+    
+    garnish       = smin(garnish, dMerc, 0.0);
+    garnish       = smin(garnish, dVenus, 0.0);
+    garnish       = smin(garnish, dEarth,  0.0);
+    garnish       = smin(garnish, dNept,   0.2);
+    garnish       = smin(garnish, dOthers, 0.0);
+
+    float outers = directionalSminY(dOuterPlanets, garnish, .016, p);
+    float small = directionalSminY(dSmallPlanets, garnish, .01, p);
+    float earth = directionalSminY(dEarthSphere, garnish, .01, p);
+    float moon = dMoonSphere;
+    
+    float planetsPlusGarnish = min(earth, min(outers, small));
+    float finalDist = smax(-planetsPlusGarnish, dRing, 0.0);
+    
+    finalDist = smin(moon, finalDist, 0.0);
+    finalDist = smax(-dStar,finalDist,0.0);
+    float stamp = stamp(p);
+    finalDist = max(finalDist, -stamp);
+
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+
+
+   
+    return min(show, finalDist);
+}
+
+/*
+float alt(in vec3 p) {
+  p.xy *= Rot(PI/2.);
+  return sdTorusX(vec3(p.x, p.y, p.z), vec2(4.0, 0.5));
+}
 
 // Surface extraction
+float mapDistance(vec3 p) {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    return mix(alt(p), mapScene(p), t);
+}*/
+
 float mapDistance(vec3 p) {
     return mapScene(p);
 }
