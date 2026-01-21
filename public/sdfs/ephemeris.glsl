@@ -172,7 +172,10 @@ float getPlanetRadius(int index) {
 
 // DEMO SPECIFIC
 float getTrailThickness(int planetID) {
-    //return 0.04;
+    return 0.04;
+}
+
+float getTrailThicknessDemo(int planetID) {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
     float t = sin(tri * PI * 0.5);
     return mix(-0.011, 0.004, t);
@@ -428,6 +431,14 @@ float getPlanetOrbitPathDistance(vec3 p, int planetID) {
     p.y /= 1.32;
     float orbitRadius = getSemiMajorAxis(planetID) * systemScale;
     float thickness   = getTrailThickness(planetID) * trailScale; 
+    return sdCircularOrbit(p, orbitRadius, thickness);
+}
+
+float getPlanetOrbitPathDistanceDemo(vec3 p, int planetID) {
+    //p.y += 0.025;
+    p.y /= 1.32;
+    float orbitRadius = getSemiMajorAxis(planetID) * systemScale;
+    float thickness   = getTrailThicknessDemo(planetID) * trailScale; 
     return sdCircularOrbit(p, orbitRadius, thickness);
 }
 
@@ -919,16 +930,16 @@ float showMeHow(vec3 p) {
     float dSmallPlanets = getSmallPlanetsDistance(transformedP, internalTargetDate);
     
     // Some orbit arcs (Mercury, Earth, Neptune, plus the rest)
-    float dMerc = getPlanetOrbitPathDistance(transformedP, MERCURY);
-    float dVenus = getPlanetOrbitPathDistance(transformedP, VENUS);
-    float dEarth = getPlanetOrbitPathDistance(transformedP, EARTH);
-    float dNept = getPlanetOrbitPathDistance(transformedP, NEPTUNE);
+    float dMerc = getPlanetOrbitPathDistanceDemo(transformedP, MERCURY);
+    float dVenus = getPlanetOrbitPathDistanceDemo(transformedP, VENUS);
+    float dEarth = getPlanetOrbitPathDistanceDemo(transformedP, EARTH);
+    float dNept = getPlanetOrbitPathDistanceDemo(transformedP, NEPTUNE);
     float dStarOrbit         = getStarOrbitPathDistance(transformedP);
     
     // Remaining orbits: (Mars=3, Jupiter=4, Saturn=5, Uranus=6)
     float dOthers = 1e10;
     for(int i = 3; i <= 6; i++) {
-        float d = getPlanetOrbitPathDistance(transformedP, i);
+        float d = getPlanetOrbitPathDistanceDemo(transformedP, i);
         if (d < dOthers) {
             dOthers = d;
         }
