@@ -898,7 +898,7 @@ float showMeHow(vec3 p) {
     //float targetDate = mix(902188183., 922188183., t);
     //float targetDate = mix(972347471., 942347471., t); 
     //float internalTargetDate = mix(200992043471., 	200928971471., t); 
-    float internalTargetDate = mix(1769109071., 1769109071., t);
+    float internalTargetDate = mix(1869109071., 1769109071., t);
 
 
     // 1) Transform to bowl space
@@ -908,7 +908,7 @@ float showMeHow(vec3 p) {
     starP.xz *= Rot(PI / 2.);
     float dStar = showMeStar(starP, targetDate);
     
-    transformedP.xz *= Rot(PI / 2.);
+    transformedP.xz *= Rot(-PI / 2.);
     
     
     // 2) Distance to all planets (incl. Moon & Sun)

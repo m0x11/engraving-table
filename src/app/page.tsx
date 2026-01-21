@@ -67,7 +67,7 @@ function dateToDisplayText(dateStr: string): string {
 
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dateInput, setDateInput] = useState("03-23-1999");
+  const [dateInput, setDateInput] = useState("01-22-2026");
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
   const [pbrParams, setPbrParams] = useState<PBRParams>({
     numReflections: 1,
