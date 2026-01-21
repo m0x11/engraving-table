@@ -245,7 +245,13 @@ vec3 getPlanetPosition(float unixTime, int planetID) {
 
 float getBowlHeight(float r) {
     if (r >= sphereRadius) return 0.0;
-    return sphereCenterY - sqrt(sphereRadius*sphereRadius - r*r);
+    //float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    //float t = sin(tri * PI * 0.5);
+    //float sphereRadiusDemo = mix(40., 15., t);
+    //float sphereCenterYDemo = mix(40.,15., t);
+    float sphereRadiusDemo = sphereRadius;
+    float sphereCenterYDemo = sphereCenterY;
+    return sphereCenterYDemo - sqrt(sphereRadiusDemo*sphereRadiusDemo - r*r);
 }
 
 vec3 transformToBowl(vec3 p) {
@@ -777,8 +783,14 @@ float mapScene(vec3 p) {
 float showMeStar(vec3 p, float targetDate) 
 {
     // --- Apply the same local transform to p ---
+
+        p.y /= 2.0;
+
+
     p.xy *= Rot(PI / 2.0);
     p.yz *= Rot(PI / 2.0);
+
+
 
     // Spoke angle in the *local yz-plane*
     float pointAngle = atan(p.z, p.y);
