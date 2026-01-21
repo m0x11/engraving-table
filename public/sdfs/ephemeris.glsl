@@ -363,13 +363,25 @@ float getOuterPlanetsDistance(vec3 p, float unixTime) {
 
 
 float getMoonDistance(vec3 p, float unixTime) {
- 
     p.y += 0.07; // Consistent with Earth
-     p.y *= DEPTH;
+    p.y *= DEPTH;
     vec3 earthPosOriginal = getPlanetPosition(unixTime, EARTH);
     vec3 moonPos = getMoonPosition(unixTime, earthPosOriginal);
     //float moonDist = length(p - moonPos) - moonRadius;
     float moonDist = sdCappedCylinder((p - moonPos), .11, .198);
+    //float moonDist = length(p - moonPos) - .15;
+    return moonDist;
+}
+
+float getMoonDistanceDemo(vec3 p, float unixTime) {
+ 
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    vec3 earthPosOriginal = getPlanetPosition(unixTime, EARTH);
+    vec3 moonPos = getMoonPosition(unixTime, earthPosOriginal);
+    //float moonDist = length(p - moonPos) - moonRadius;
+    
+    float moonDist = sdCappedCylinder((p - moonPos), mix(-0.15, .122, t), .598);
     //float moonDist = length(p - moonPos) - .15;
     return moonDist;
 }
@@ -885,8 +897,10 @@ float showMeHow(vec3 p) {
 
     //float targetDate = mix(902188183., 922188183., t);
     //float targetDate = mix(972347471., 942347471., t); 
-    float internalTargetDate = mix(200992043471., 	200928971471., t); 
-    
+    //float internalTargetDate = mix(200992043471., 	200928971471., t); 
+    float internalTargetDate = mix(1769109071., 1769109071., t);
+
+
     // 1) Transform to bowl space
     vec3 transformedP = transformToBowl(p);
     //vec3 transformedP = p;
@@ -900,7 +914,7 @@ float showMeHow(vec3 p) {
     // 2) Distance to all planets (incl. Moon & Sun)
     //float dPlanets = getPlanetsDistance(transformedP, targetDate);
     float dOuterPlanets = getOuterPlanetsDistance(transformedP, internalTargetDate);
-    float dMoonSphere = getMoonDistance(transformedP, internalTargetDate);
+    float dMoonSphere = getMoonDistanceDemo(transformedP, internalTargetDate);
     float dEarthSphere = getEarthDistance(transformedP, internalTargetDate);
     float dSmallPlanets = getSmallPlanetsDistance(transformedP, internalTargetDate);
     
