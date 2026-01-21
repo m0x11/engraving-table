@@ -83,6 +83,8 @@ export default function Home() {
     lightDir: [1.0, 2.0, 3.0],
     diffuseStrength: 1.0,
   });
+  const [fps, setFps] = useState(0);
+  const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
 
   // Compute derived values
   const unixTimestamp = parseDateToUnix(dateInput);
@@ -662,6 +664,15 @@ export default function Home() {
         material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
         material.uniforms.uZoom.value = zoom;
         renderer.render(scene, camera);
+
+        // FPS calculation
+        fpsRef.current.frames++;
+        const now = performance.now();
+        if (now - fpsRef.current.lastTime >= 1000) {
+          setFps(fpsRef.current.frames);
+          fpsRef.current.frames = 0;
+          fpsRef.current.lastTime = now;
+        }
       };
       animate();
 
@@ -729,6 +740,9 @@ export default function Home() {
         className="w-full h-full cursor-grab active:cursor-grabbing"
       />
       <div className="absolute top-4 left-4 bg-black/70 p-4 rounded-lg max-w-xs">
+        {/* FPS Counter */}
+        <div className="text-white/50 text-xs mb-3 font-mono">{fps} FPS</div>
+
         {/* Date Input */}
         <div className="mb-4">
           <label className="block text-white/70 text-xs mb-1">Date (mm-dd-yyyy)</label>

@@ -784,7 +784,7 @@ float showMeStar(vec3 p, float targetDate)
 {
     // --- Apply the same local transform to p ---
 
-        p.y /= 2.0;
+    p.y /= 2.0;
 
 
     p.xy *= Rot(PI / 2.0);
@@ -868,7 +868,7 @@ float showMeHow(vec3 p) {
     float t = sin(tri * PI * 0.5);
     
 
-    p.y -= 1.;
+    //p.y -= 0.22;
     //p.yz *= Rot(-PI / 4.);
     //p.yz *= Rot(PI / 3.);
     //float t = 0.;
@@ -956,7 +956,6 @@ float showMeHow(vec3 p) {
 float mapScene(vec3 p) {
     // targetDate is set externally (via uniform in viewer, or hardcoded for mesh generation)
 
-    float show = showMeHow(p);
     
     // 1) Transform to bowl space
     vec3 transformedP = transformToBowl(p);
@@ -1024,15 +1023,17 @@ float mapScene(vec3 p) {
 
 
    
-    return min(show, finalDist);
+    //return min(show, finalDist);
+    return finalDist;
 }
 
-/*
+
 float alt(in vec3 p) {
   p.xy *= Rot(PI/2.);
   return sdTorusX(vec3(p.x, p.y, p.z), vec2(4.0, 0.5));
 }
 
+/*
 // Surface extraction
 float mapDistance(vec3 p) {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
@@ -1040,6 +1041,16 @@ float mapDistance(vec3 p) {
     return mix(alt(p), mapScene(p), t);
 }*/
 
+/*
 float mapDistance(vec3 p) {
     return mapScene(p);
+}
+*/
+
+float mapDistance(vec3 p) {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    float show = showMeHow(p);
+    return min(show, mix(alt(p), mapScene(p), t));
+    //return show;
 }
