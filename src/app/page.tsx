@@ -72,12 +72,12 @@ export default function Home() {
   const [pbrParams, setPbrParams] = useState<PBRParams>({
     numReflections: 1,
     light1Color: [1.0, 1.0, 1.0],
-    light1Intensity: 3.0,
+    light1Intensity: 20.0,
     light2Color: [1.0, 1.0, 1.0],
-    light2Intensity: 22.0,
-    ambientIntensity: 0.01,
+    light2Intensity: 4.5,
+    ambientIntensity: 0.0,
     metallic: 1.0,
-    roughness: 0.1,
+    roughness: 0.47,
   });
   const [simpleParams, setSimpleParams] = useState<SimpleParams>({
     lightDir: [1.0, 2.0, 3.0],
@@ -426,28 +426,36 @@ export default function Home() {
         }
 
         float textOnInnerCylinder(vec3 p) {
+          // Transform to match the drill hole coordinate system
+          // From signet: p.y += 0.8
+          // From drillHole: p.y += bandPosY (3.7), then rotate
           vec3 q = p;
-          q.y += 0.8;
-          q.y += 3.7;
-          q.xy = Rot2D(PI/2.0) * q.xy;
+          q.y += 0.8;   // signet offset
+          q.y += 3.7;   // bandPosY offset
+          q.xy = Rot2D(PI/2.0) * q.xy;  // Rotate to align with cylinder axis
 
+          // Now cylinder axis is along Y, radius in XZ plane
+          // Cylinder radius is 3.9 (from drillHole)
           float cylinderRadius = 3.9;
 
-          float angle = atan(q.z, q.x);
-          float r = length(q.xz);
-          float h = q.y;
+          // Convert to cylindrical coordinates
+          float angle = atan(q.z, q.x);  // Angle around cylinder (-PI to PI)
+          float r = length(q.xz);        // Distance from cylinder axis
+          float h = q.y;                 // Height along cylinder axis
 
+          // Map cylindrical coords to 2D text coordinates - rotate 180 degrees
           float textScale = 1.0;
-
           float textX = -angle * cylinderRadius / textScale;
-          float textY = -(h + 0.3) / textScale;
+          float textY = h / textScale + 0.34;  // +0.34 centers the glyphs
 
+          // Sample 2D text SDF
           float d2d = textSdf2D(vec2(textX, textY));
 
-          float textDepth = 0.15;
-          float surfaceDist = cylinderRadius - r;
-          float dr = surfaceDist - textDepth;
+          // Extrude radially inward from cylinder surface
+          float textDepth = 0.15;  // How deep to engrave
+          float surfaceDist = cylinderRadius - r;  // Distance from inner surface
 
+          // Combine 2D text with radial extrusion
           vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
           return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
         }
