@@ -443,10 +443,10 @@ export default function Home() {
           float r = length(q.xz);        // Distance from cylinder axis
           float h = q.y;                 // Height along cylinder axis
 
-          // Map cylindrical coords to 2D text coordinates - rotate 180 degrees
+          // Map cylindrical coords to 2D text coordinates
           float textScale = 1.0;
           float textX = -angle * cylinderRadius / textScale;
-          float textY = h / textScale + 0.34;  // +0.34 centers the glyphs
+          float textY = -(h - 0.34) / textScale;  // negative h flips for correct reading direction, +0.34 centers
 
           // Sample 2D text SDF
           float d2d = textSdf2D(vec2(textX, textY));
