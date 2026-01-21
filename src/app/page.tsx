@@ -411,8 +411,9 @@ export default function Home() {
         float textSdf2D(vec2 p) {
           float d = 1000.0;
           float advance = 0.52;
-          float totalWidth = ${numGlyphs.toFixed(1)} * advance;
-          float xStart = -totalWidth * 0.5 + advance * 0.25;
+          // Center text: place midpoint between first and last glyph at x=0
+          // Additional offset to compensate for visual centering (dots are narrower than digits)
+          float xStart = -float(${numGlyphs - 1}) * advance * 0.5 - 0.26;
 
           ${textSdfCode}
 
@@ -443,10 +444,10 @@ export default function Home() {
           float r = length(q.xz);        // Distance from cylinder axis
           float h = q.y;                 // Height along cylinder axis
 
-          // Map cylindrical coords to 2D text coordinates
-          float textScale = 1.0;
+          // Map to text coordinates
+          float textScale = 1.5;
           float textX = -angle * cylinderRadius / textScale;
-          float textY = -(h - 0.34) / textScale;  // negative h flips for correct reading direction, +0.34 centers
+          float textY = -h / textScale + 0.34;  // negative h flips for viewer, +0.34 centers
 
           // Sample 2D text SDF
           float d2d = textSdf2D(vec2(textX, textY));
