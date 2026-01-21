@@ -680,8 +680,7 @@ float stamp(vec3 p) {
 //////////////////////////////////////////////////////////
 
 float mapScene(vec3 p) {
-   
-    float targetDate = 942347471.;
+    // targetDate is set externally (via uniform in viewer, or hardcoded for mesh generation)
 
     // 1) Transform to bowl space
     vec3 transformedP = transformToBowl(p);
