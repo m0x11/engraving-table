@@ -85,6 +85,18 @@ export default function Home() {
   });
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
+  const [showSliders, setShowSliders] = useState(true);
+
+  // Toggle sliders with "h" key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "h" && !(e.target instanceof HTMLInputElement)) {
+        setShowSliders((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Compute derived values
   const unixTimestamp = parseDateToUnix(dateInput);
@@ -790,7 +802,7 @@ export default function Home() {
         </div>
 
         {/* PBR Parameters */}
-        {lightingMode === "pbr" && (
+        {showSliders && lightingMode === "pbr" && (
           <div className="space-y-2">
             <div className="text-white/70 text-xs mb-2">PBR Settings</div>
             <Slider
@@ -837,7 +849,7 @@ export default function Home() {
         )}
 
         {/* Simple Parameters */}
-        {lightingMode === "simple" && (
+        {showSliders && lightingMode === "simple" && (
           <div className="space-y-2">
             <div className="text-white/70 text-xs mb-2">Simple Settings</div>
             <Slider
