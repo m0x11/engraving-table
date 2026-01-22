@@ -15,15 +15,15 @@
 // showMeT: used for showMe animations and demo distance fields
 float showMeT() {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    //return sin(tri * PI * 0.5);
-    return 1.0;
+    return sin(tri * PI * 0.5);
+    //return 1.0;
 }
 
 // relicT: used for final interpolation between alt and mapScene
 float relicT() {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    //return sin(tri * PI * 0.5);
-    return 1.0;
+    return sin(tri * PI * 0.5);
+    //return 1.0;
 }
 
 // Visual scale factors
@@ -691,7 +691,8 @@ float stamp(vec3 p) {
     //scale
     p *= 1.4;
     
-    float s = mix(-2.0, -1.0, t);
+    //float s = mix(-2.0, -1.0, t);
+    float s = -1.0;
     float ftusMain = fractus(p.yx, vec2(s, 0.0));
     p.z = abs(p.z);
     //float slice = smax(ftusMain, p.z - thickness, 0.02);
@@ -1048,16 +1049,16 @@ float mapDistance(vec3 p) {
 
 
 // DEMO 1 ANIMATION
-/*
 float mapDistance(vec3 p) {
     float t = relicT();
     float show = showMeHow(p);
     return min(show, mix(alt(p), mapScene(p), t));
     //return show;
 }
-*/
 
 // DEMO 2 ANIMATION
+
+/*
 float mapDistance(vec3 p) {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
     float t = sin(tri * PI * 0.5);
@@ -1070,3 +1071,4 @@ float mapDistance(vec3 p) {
     //return min(show, mapScene(p));
     return mapScene(p);
 }
+*/

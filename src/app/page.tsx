@@ -21,6 +21,7 @@ type LightingMode = "pbr" | "simple";
 
 type PBRParams = {
   numReflections: number;
+  light1Dir: [number, number, number];
   light1Color: [number, number, number];
   light1Intensity: number;
   light2Color: [number, number, number];
@@ -71,6 +72,7 @@ export default function Home() {
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
   const [pbrParams, setPbrParams] = useState<PBRParams>({
     numReflections: 1,
+    light1Dir: [1.0, 1.0, 0.0],
     light1Color: [1.0, 1.0, 1.0],
     light1Intensity: 20.0,
     light2Color: [1.0, 1.0, 1.0],
@@ -112,6 +114,7 @@ export default function Home() {
     const m = materialRef.current;
 
     m.uniforms.uLightingMode.value = lightingMode === "pbr" ? 0 : 1;
+    m.uniforms.uLight1Dir.value.set(...pbrParams.light1Dir);
     m.uniforms.uLight1Color.value.set(...pbrParams.light1Color);
     m.uniforms.uLight1Intensity.value = pbrParams.light1Intensity;
     m.uniforms.uLight2Color.value.set(...pbrParams.light2Color);
@@ -254,6 +257,7 @@ export default function Home() {
         uniform int uLightingMode; // 0 = PBR, 1 = Simple
 
         // PBR params
+        uniform vec3 uLight1Dir;
         uniform vec3 uLight1Color;
         uniform float uLight1Intensity;
         uniform vec3 uLight2Color;
@@ -584,7 +588,7 @@ export default function Home() {
           vec3 albedo = vec3(0.1);
 
           // Two lights
-          vec3 L1 = normalize(vec3(1.0, 1.0, 0.0));
+          vec3 L1 = normalize(uLight1Dir);
           vec3 L2 = normalize(vec3(-1.0, 1.0, 0.0));
 
           vec3 light1 = uLight1Color * uLight1Intensity;
@@ -605,11 +609,11 @@ export default function Home() {
           vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
 
           // Camera setup - use orbit camera style for PBR mode
-          float cameraHeight = 0.0;
+          float cameraHeight = -6.0;  // Vertical offset for camera target
           float camDist = 6.0 / uZoom;
 
           mat3 rot = rotateY(uRotation.y) * rotateX(uRotation.x);
-          vec3 ro = rot * vec3(0.0, 0.0, camDist);
+          vec3 ro = rot * vec3(0.0, 0.0, camDist) + vec3(0.0, cameraHeight, 0.0);
           vec3 rd = rot * normalize(vec3(uv, -1.0));
 
           vec3 col = vec3(0.0);
@@ -646,6 +650,7 @@ export default function Home() {
         uTargetDate: { value: unixTimestamp },
         uLightingMode: { value: lightingMode === "pbr" ? 0 : 1 },
         // PBR params
+        uLight1Dir: { value: new THREE.Vector3(...pbrParams.light1Dir) },
         uLight1Color: { value: new THREE.Vector3(...pbrParams.light1Color) },
         uLight1Intensity: { value: pbrParams.light1Intensity },
         uLight2Color: { value: new THREE.Vector3(...pbrParams.light2Color) },
@@ -869,6 +874,30 @@ export default function Home() {
         {showSliders && lightingMode === "pbr" && (
           <div className="space-y-2">
             <div className="text-white/70 text-xs mb-2">PBR Settings</div>
+            <Slider
+              label="Light 1 X"
+              value={pbrParams.light1Dir[0]}
+              min={-3}
+              max={3}
+              step={0.1}
+              onChange={(v) => setPbrParams((p) => ({ ...p, light1Dir: [v, p.light1Dir[1], p.light1Dir[2]] }))}
+            />
+            <Slider
+              label="Light 1 Y"
+              value={pbrParams.light1Dir[1]}
+              min={-3}
+              max={3}
+              step={0.1}
+              onChange={(v) => setPbrParams((p) => ({ ...p, light1Dir: [p.light1Dir[0], v, p.light1Dir[2]] }))}
+            />
+            <Slider
+              label="Light 1 Z"
+              value={pbrParams.light1Dir[2]}
+              min={-3}
+              max={3}
+              step={0.1}
+              onChange={(v) => setPbrParams((p) => ({ ...p, light1Dir: [p.light1Dir[0], p.light1Dir[1], v] }))}
+            />
             <Slider
               label="Light 1 Intensity"
               value={pbrParams.light1Intensity}
