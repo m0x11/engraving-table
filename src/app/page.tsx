@@ -130,14 +130,15 @@ export default function Home() {
     const container = containerRef.current;
     let animationId: number;
 
-    // Load font data, petals, and ephemeris SDF
+    // Load font data, common utilities, petals, and ephemeris SDF
     Promise.all([
       fetch("/fonts/PPRightSerifMono-msdf.json").then((res) => res.json()),
+      fetch("/sdfs/common.glsl").then((res) => res.text()),
       fetch("/sdfs/petals.glsl").then((res) => res.text()),
       fetch("/sdfs/ephemeris.glsl").then((res) => res.text()),
-    ]).then(([fontData, petalsGlsl, ephemerisGlsl]: [FontData, string, string]) => {
-      // Combine petals + ephemeris so ephemeris can use petals functions
-      const combinedGlsl = petalsGlsl + "\n" + ephemerisGlsl;
+    ]).then(([fontData, commonGlsl, petalsGlsl, ephemerisGlsl]: [FontData, string, string, string]) => {
+      // Combine: common -> petals -> ephemeris (order matters for dependencies)
+      const combinedGlsl = commonGlsl + "\n" + petalsGlsl + "\n" + ephemerisGlsl;
 
       // Process combined GLSL - rename functions and remove conflicting defines
       const processedEphemeris = combinedGlsl
@@ -482,10 +483,10 @@ export default function Home() {
 
         float formOnInnerCylinder(vec3 p) {
           // ========== FORM ADJUSTMENTS ==========
-          float formScale = 1.44;      // Size of the petal (smaller = larger petal)
+          float formScale = 1.55;      // Size of the petal (smaller = larger petal)
           float formOffsetY = 0.34;    // Vertical offset (positive = up)
           float formRotation = 0.0;   // Rotation in radians (around depth axis)
-          float formDepth = 1.;      // How deep the form extends
+          float formDepth = 0.5;      // How deep the form extends
           // =======================================
 
           // Animation timer
@@ -530,7 +531,8 @@ export default function Home() {
           petalXY = Rot2D(formRotation) * petalXY;          // Apply rotation
           petalXY *= formScale;                              // Apply scale
           vec3 petalP = vec3(petalXY.x, petalXY.y, surfaceDist / formDepth);
-          float dPetal = petalsSdf(petalP, uTime) / formScale;  // Scale the result back
+          //float dPetal = petalsSdf(petalP, uTime) / formScale;  // Scale the result back
+          float dPetal = Form(petalP, uTime) / formScale;  // Scale the result back
 
           // Mix between text and petal based on animation
           return mix(dText, dPetal, t);
@@ -542,7 +544,7 @@ export default function Home() {
           ${hasText ? `
           float dForm = formOnInnerCylinder(p);
           float dText = textOnInnerCylinder(p);
-          return max(dEphemeris, -dForm);
+          return max(dEphemeris, -dText);
           ` : `
           return dEphemeris;
           `}

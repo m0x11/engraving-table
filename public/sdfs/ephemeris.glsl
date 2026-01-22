@@ -1,7 +1,11 @@
+//////////////////////////////////////////////////////////
+// Ephemeris SDF - Planetary ring with orbital visualization
+// Requires: common.glsl to be loaded first
+//////////////////////////////////////////////////////////
+
 #define MAX_STEPS 100
 #define MAX_DIST  100.0
 #define SURF_DIST 0.001
-//#define PI 3.141592653589793
 #define DEG_TO_RAD (PI / 180.0)
 #define DEPTH 2.2
 
@@ -20,47 +24,6 @@ float relicT() {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
     //return sin(tri * PI * 0.5);
     return 1.0;
-}
-
-float smax(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0);
-    return mix(b, a, h) + k * h * (1.0 - h);
-}
-
-
-
-float sdCappedCylinder(vec3 p, float r, float hh) {
-    vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r, hh);
-    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
-}
-
-float sdCapsule(vec3 p, float r, float h) {
-    float y = max(0.0, min(h, p.y));
-    return length(vec3(p.x, p.y - y, p.z)) - r;
-}
-
-float sdTorusX(vec3 p, vec2 t) {
-    vec2 q = vec2(length(p.yz) - t.x, p.x);
-    return length(q) - t.y;
-}
-
-float sdBox(vec3 p, vec3 s) {
-    p = abs(p)-s;
-	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
-}
-
-float sdDiamondTorus(vec3 p, float R, float r) {
-    vec2 xz = vec2(length(p.xz), p.y);
-    vec2 q = vec2(xz.x - R, xz.y);
-    
-    // Rotate by 45 degrees
-    float angle = PI / 4.0;
-    float c = cos(angle);
-    float s = sin(angle);
-    q = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
-    
-    vec2 d = abs(q) - vec2(r);
-    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
 }
 
 // Visual scale factors
@@ -296,11 +259,7 @@ float getBowlSphereDistance(vec3 p) {
     return length(p - sphereCenter) - sphereRadius;
 }
 
-mat2 Rot(float a) {
-    float s = sin(a);
-    float c = cos(a);
-    return mat2(c, -s, s, c);
-}
+// Rot is now in common.glsl
 
 //////////////////////////////////////////////////////////
 // MOON ORBIT
@@ -485,11 +444,8 @@ float getStarOrbitPathDistance(vec3 p) {
 
 //////////////////////////////////////////////////////////
 // Additional geometry (Ring, Signet, Star, Bowl)
+// smin/smax are now in common.glsl
 //////////////////////////////////////////////////////////
-float smin(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-    return mix(b, a, h) - k * h * (1.0 - h);
-}
 
 float sminRate(float a, float b, float k, float rate) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
