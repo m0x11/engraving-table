@@ -5,6 +5,23 @@
 #define DEG_TO_RAD (PI / 180.0)
 #define DEPTH 2.2
 
+//////////////////////////////////////////////////////////
+// Global Animation Timers
+//////////////////////////////////////////////////////////
+// showMeT: used for showMe animations and demo distance fields
+float showMeT() {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    //return sin(tri * PI * 0.5);
+    return 1.0;
+}
+
+// relicT: used for final interpolation between alt and mapScene
+float relicT() {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    //return sin(tri * PI * 0.5);
+    return 1.0;
+}
+
 float smax(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0);
     return mix(b, a, h) + k * h * (1.0 - h);
@@ -155,9 +172,7 @@ float getOrbitalPeriod(int planetID) {
 #define PLANET_SCALE 0.5
 
 float getPlanetRadius(int index) {
-
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
+    float t = showMeT();
     // -1 => Sun
     if (index == -1) {
         return 0.0; // star radius
@@ -176,8 +191,7 @@ float getTrailThickness(int planetID) {
 }
 
 float getTrailThicknessDemo(int planetID) {
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
+    float t = showMeT();
     return mix(-0.011, 0.004, t);
 }
 
@@ -377,15 +391,11 @@ float getMoonDistance(vec3 p, float unixTime) {
 }
 
 float getMoonDistanceDemo(vec3 p, float unixTime) {
- 
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
+    float t = showMeT();
     vec3 earthPosOriginal = getPlanetPosition(unixTime, EARTH);
     vec3 moonPos = getMoonPosition(unixTime, earthPosOriginal);
-    //float moonDist = length(p - moonPos) - moonRadius;
-    
+
     float moonDist = sdCappedCylinder((p - moonPos), mix(-0.15, .122, t), .598);
-    //float moonDist = length(p - moonPos) - .15;
     return moonDist;
 }
 
@@ -803,12 +813,9 @@ float mapScene(vec3 p) {
 // demo
 
 
-float showMeStar(vec3 p, float targetDate) 
+float showMeStar(vec3 p, float targetDate)
 {
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
-    
-    t = 1.0;
+    float t = showMeT();
     
     p.y /= 2.0;
     p.xy *= Rot(PI / 2.0);
@@ -870,11 +877,7 @@ float showMeStar(vec3 p, float targetDate)
 
 
 float showMeHow(vec3 p) {
-
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
-    
-    t = 1.0;
+    float t = showMeT();
 
     //p.y -= 0.22;
     //p.yz *= Rot(-PI / 4.);
@@ -1028,12 +1031,6 @@ float mapScene(vec3 p) {
     float stamp = stamp(p);
     finalDist = max(finalDist, -stamp);
 
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
-
-
-   
-    //return min(show, finalDist);
     return finalDist;
 }
 
@@ -1057,10 +1054,25 @@ float mapDistance(vec3 p) {
 }
 */
 
+
+// DEMO 1 ANIMATION
+/*
 float mapDistance(vec3 p) {
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
+    float t = relicT();
     float show = showMeHow(p);
     return min(show, mix(alt(p), mapScene(p), t));
     //return show;
+}
+*/
+
+// DEMO 2 ANIMATION
+float mapDistance(vec3 p) {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+
+    vec3 showP = p;
+    //showP.xy *= Rot(mix(PI / 2., 0., t));
+    showP.y += mix(0.55, 0., t);
+    float show = showMeHow(showP);
+    return min(show, mapScene(p));
 }
