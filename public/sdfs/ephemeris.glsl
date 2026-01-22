@@ -805,21 +805,17 @@ float mapScene(vec3 p) {
 
 float showMeStar(vec3 p, float targetDate) 
 {
-    // --- Apply the same local transform to p ---
-
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    
+    t = 1.0;
+    
     p.y /= 2.0;
-
-
     p.xy *= Rot(PI / 2.0);
     p.yz *= Rot(PI / 2.0);
 
-
-
     // Spoke angle in the *local yz-plane*
     float pointAngle = atan(p.z, p.y);
-    
-    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    float t = sin(tri * PI * 0.5);
     
     //float numSpokes = mix(111., 8., t);
     float numSpokes = 8.;
@@ -869,18 +865,6 @@ float showMeStar(vec3 p, float targetDate)
     //float rayThickness = isAxisAligned ? 0.0033 : 0.0048;
     float rayThickness = mix(0., 0.004, t);
     float rays = sdCapsule(spokePt, rayThickness, rayLength);
-    
-    // If we're near Earth, create a masking sphere
-    /*
-    if (earthAngularDist < PI/8.) {
-        vec3 maskPos = vec3(0.0, earthMaskOffset, 0.0);
-        maskPos.yz *= Rot(closestSpokeAngle);
-        float maskingSphere = length(p - maskPos) - maskingSphereRadius;
-        rays = max(-maskingSphere, rays);
-    }*/
-    
-    // If we're near Neptune, create another masking sphere
-
     return rays;
 }
 
@@ -890,6 +874,7 @@ float showMeHow(vec3 p) {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
     float t = sin(tri * PI * 0.5);
     
+    t = 1.0;
 
     //p.y -= 0.22;
     //p.yz *= Rot(-PI / 4.);
