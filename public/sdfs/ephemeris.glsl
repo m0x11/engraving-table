@@ -49,6 +49,20 @@ float sdBox(vec3 p, vec3 s) {
 	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
 }
 
+float sdDiamondTorus(vec3 p, float R, float r) {
+    vec2 xz = vec2(length(p.xz), p.y);
+    vec2 q = vec2(xz.x - R, xz.y);
+    
+    // Rotate by 45 degrees
+    float angle = PI / 4.0;
+    float c = cos(angle);
+    float s = sin(angle);
+    q = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+    
+    vec2 d = abs(q) - vec2(r);
+    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+
 // Visual scale factors
 #ifndef systemScale
     #define systemScale 1.32   // Overall scale factor

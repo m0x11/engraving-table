@@ -197,3 +197,138 @@ float vineSdf(vec3 p, float time) {
     p.xy *= petalsRot(PI / 2.0);
     return petalsForm(p, 1.0, time);
 }
+
+
+float starShape(vec3 p, float targetDate) 
+{
+    float result = 1e10;
+    
+    float spokeAngles[8];
+    spokeAngles[0] = 0.0;
+    spokeAngles[1] = PI / 4.0 / 1.11;
+    spokeAngles[2] = PI / 2.0;
+    spokeAngles[3] = 3.0 * PI / 4.0 * 1.033;
+    spokeAngles[4] = PI;
+    spokeAngles[5] = -3.0 * PI / 4.0 * 1.033;
+    spokeAngles[6] = -PI / 2.0;
+    spokeAngles[7] = -PI / 4.0 / 1.11;
+    
+    for (int i = 0; i < 8; i++) {
+        float angle = spokeAngles[i];
+        
+        float rayLength = 1.3;
+        float rayThickness = 0.022;
+        vec3 torusPos = vec3(0.0, 2.0, 0.0);
+        float torusSize = 0.5;
+        float blendAmount = 0.5;
+        
+        if (i == 0 || i == 4) {
+            torusPos.y = 1.85;
+            rayLength = 3.9;
+        }
+        else if (i == 2 || i == 6) {
+            torusPos.y = 1.22;
+            rayLength = 2.64;
+        }
+        else {
+            torusPos.y = 1.5;
+            rayLength = 3.18;
+        }
+        
+        vec3 spokePt = p;
+        spokePt.yz *= Rot(-angle);
+        
+        // ONE-SIDED RAY: offset box so it only extends in +Y direction
+        vec3 rayPt = spokePt;
+        rayPt.y -= rayLength * 0.5;  // shift box center up
+        float ray = sdBox(rayPt, vec3(rayThickness, rayLength * 0.5, rayThickness));
+        
+        // Adjust torus position to match (it's now relative to the one-sided ray)
+        vec3 tPt = spokePt - torusPos;
+        tPt.xy *= Rot(PI / 2.0);
+        float torus = sdDiamondTorus(tPt, torusSize, 0.02);
+        
+        float spoke = smin(ray, torus, blendAmount);
+        result = min(result, spoke);
+    }
+    
+    return result;
+}
+
+struct Ring {
+    float radius;
+    float thickness;
+};
+
+Ring rings[1] = Ring[1](
+    Ring(3.55, 0.044)
+    //Ring(2.22, 0.011)
+    //Ring(2.22, -0.01)
+    //Ring(2.8, 0.022)
+);
+
+Ring rings2[2] = Ring[2](
+    Ring(1.5, 0.11),
+    Ring(2., -0.01)
+    //Ring(2.8, 0.022)
+);
+
+float dial(vec3 p, float dialSeed) {
+    //p.y *= smax((abs(p.x)/1.) *2., 1., 0.4);
+    //p.zx *= tan(p.x + iTime)/.5;
+    p.xy *= Rot(PI/2.);
+    
+    //p.z *= smax((abs(p.z)/2.) *2., 1., 0.4);
+
+    float minDist = 1e10; // Start with a large value
+    
+    for (int i = 0; i < 3; i++) {
+        float dist = sdDiamondTorus(p, rings2[i].radius, rings2[i].thickness);
+        minDist = min(minDist, dist);
+    }
+    
+    return minDist;
+}
+
+float oval(vec3 p, float dialSeed) {
+    //p.y *= smax((abs(p.x)/1.) *2., 1., 0.4);
+    //p.zx *= tan(p.x + iTime)/.5;
+    p.xy *= Rot(PI/2.);
+    p.z *= 1.5;
+   //p.z *= smax((abs(p.z)/2.) *2., 1., 0.4);
+
+    float minDist = 1e10; // Start with a large value
+    
+    for (int i = 0; i < 3; i++) {
+        float dist = sdDiamondTorus(p, rings[i].radius, rings[i].thickness);
+        minDist = min(minDist, dist);
+    }
+    
+    return minDist;
+}
+
+
+float sun (vec3 p) {
+    return length(p) + 1.;
+}
+
+float Form (vec3 p, float seed) {
+
+  
+    //p.y *= smax((abs(p.z)/1.) *2., 1., 0.4);
+    //p.z *= smax((abs(p.z)/1.) *1., 1., 0.);
+    //p.zx *= sin(p.x + iTime)/.5;
+    
+    //p.z *= smax((abs(p.z)/2.) *2., 1., 0.4);
+
+    //float dial = dialPlain(p);
+    //float star = star(p, 1.0);
+    float oval = oval(p, 1.0);
+    float dial = dial(p, 1.0);
+    
+    float star = starShape(p, 1.0);
+    //float form = smin(dial, smin(oval, star, .44), .2);
+    float form = smin(oval, star, 0.3);
+    return smin(form, sun(p), 1.8);
+    //return smax(form, -(length(p)-.5), 1.);
+} 

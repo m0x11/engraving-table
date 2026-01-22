@@ -481,6 +481,17 @@ export default function Home() {
 
 
         float formOnInnerCylinder(vec3 p) {
+          // ========== FORM ADJUSTMENTS ==========
+          float formScale = 1.44;      // Size of the petal (smaller = larger petal)
+          float formOffsetY = 0.34;    // Vertical offset (positive = up)
+          float formRotation = 0.0;   // Rotation in radians (around depth axis)
+          float formDepth = 1.;      // How deep the form extends
+          // =======================================
+
+          // Animation timer
+          float tri = abs(fract(uTime / 4.0) * 2.0 - 1.0);
+          float t = sin(tri * PI * 0.5);
+
           // Transform to match the drill hole coordinate system
           // From signet: p.y += 0.8
           // From drillHole: p.y += bandPosY (3.7), then rotate
@@ -510,17 +521,28 @@ export default function Home() {
           float textDepth = 0.15;  // How deep to engrave
           float surfaceDist = cylinderRadius - r;  // Distance from inner surface
 
-          // Combine 2D text with radial extrusion
+          // Text SDF - combine 2D text with radial extrusion
           vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
-          return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+          float dText = min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+
+          // Petal SDF - transform to cylinder space with adjustments
+          vec2 petalXY = vec2(textX, textY - formOffsetY);  // Apply vertical offset
+          petalXY = Rot2D(formRotation) * petalXY;          // Apply rotation
+          petalXY *= formScale;                              // Apply scale
+          vec3 petalP = vec3(petalXY.x, petalXY.y, surfaceDist / formDepth);
+          float dPetal = petalsSdf(petalP, uTime) / formScale;  // Scale the result back
+
+          // Mix between text and petal based on animation
+          return mix(dText, dPetal, t);
         }
-          
+
         float sceneSdf(vec3 p) {
           float dEphemeris = ephemerisSdf(p);
 
           ${hasText ? `
+          float dForm = formOnInnerCylinder(p);
           float dText = textOnInnerCylinder(p);
-          return max(dEphemeris, -dText);
+          return max(dEphemeris, -dForm);
           ` : `
           return dEphemeris;
           `}
