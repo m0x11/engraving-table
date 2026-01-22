@@ -1,7 +1,7 @@
 #define MAX_STEPS 100
 #define MAX_DIST  100.0
 #define SURF_DIST 0.001
-#define PI 3.141592653589793
+//#define PI 3.141592653589793
 #define DEG_TO_RAD (PI / 180.0)
 #define DEPTH 2.2
 
@@ -694,8 +694,25 @@ vec3 curveSpace(vec3 p) {
 }
 
 
+float stampHand(vec3 p) {
+    // move into position
+    p.y += 8.39;
+
+    p.yz *= Rot(PI/2.);
+    //p.x -= 1.;
+    p = curveSpace(p);
+ 
+    //scale
+    //p *= 1.4;
+    
+    return petalsSdf(p, 1.0);
+}
+
 float stamp(vec3 p) {
-    float thickness = .11;
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    float hand = stampHand(p);
+    float thickness = .22;
     // move into position
     p.y += 8.45;
     p.yz *= Rot(PI/2.);
@@ -704,13 +721,18 @@ float stamp(vec3 p) {
     //scale
     p *= 1.4;
     
-    float ftusMain = fractus(p.yx, vec2(-1., 0.0));
+    float s = mix(-2.0, -1.0, t);
+    float ftusMain = fractus(p.yx, vec2(s, 0.0));
     p.z = abs(p.z);
     //float slice = smax(ftusMain, p.z - thickness, 0.02);
     float slice = max(ftusMain, p.z - thickness);
  
+    //return mix(hand, slice, t);
     return slice;
+    //return min(slice, hand);
 }
+
+
 
 //////////////////////////////////////////////////////////
 // Final Scene Distance
@@ -1074,5 +1096,7 @@ float mapDistance(vec3 p) {
     //showP.xy *= Rot(mix(PI / 2., 0., t));
     showP.y += mix(0.55, 0., t);
     float show = showMeHow(showP);
-    return min(show, mapScene(p));
+    //return min(stampHand(p), min(show, mapScene(p)));
+    //return min(show, mapScene(p));
+    return mapScene(p);
 }

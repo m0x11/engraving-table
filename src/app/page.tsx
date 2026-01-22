@@ -130,13 +130,17 @@ export default function Home() {
     const container = containerRef.current;
     let animationId: number;
 
-    // Load font data and ephemeris SDF
+    // Load font data, petals, and ephemeris SDF
     Promise.all([
       fetch("/fonts/PPRightSerifMono-msdf.json").then((res) => res.json()),
+      fetch("/sdfs/petals.glsl").then((res) => res.text()),
       fetch("/sdfs/ephemeris.glsl").then((res) => res.text()),
-    ]).then(([fontData, ephemerisGlsl]: [FontData, string]) => {
-      // Process ephemeris GLSL - rename functions and remove conflicting defines
-      const processedEphemeris = ephemerisGlsl
+    ]).then(([fontData, petalsGlsl, ephemerisGlsl]: [FontData, string, string]) => {
+      // Combine petals + ephemeris so ephemeris can use petals functions
+      const combinedGlsl = petalsGlsl + "\n" + ephemerisGlsl;
+
+      // Process combined GLSL - rename functions and remove conflicting defines
+      const processedEphemeris = combinedGlsl
         .replace(/mapDistance/g, "ephemerisSdf")
         .replace(/mapScene/g, "ephemerisScene")
         // Remove targetDate hardcoding - we'll inject it as uniform
@@ -475,6 +479,42 @@ export default function Home() {
           return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
         }
 
+
+        float formOnInnerCylinder(vec3 p) {
+          // Transform to match the drill hole coordinate system
+          // From signet: p.y += 0.8
+          // From drillHole: p.y += bandPosY (3.7), then rotate
+          vec3 q = p;
+          q.y += 0.8;   // signet offset
+          q.y += 3.7;   // bandPosY offset
+          q.xy = Rot2D(PI/2.0) * q.xy;  // Rotate to align with cylinder axis
+
+          // Now cylinder axis is along Y, radius in XZ plane
+          // Cylinder radius is 3.9 (from drillHole)
+          float cylinderRadius = 3.9;
+
+          // Convert to cylindrical coordinates
+          float angle = atan(q.z, q.x);  // Angle around cylinder (-PI to PI)
+          float r = length(q.xz);        // Distance from cylinder axis
+          float h = q.y;                 // Height along cylinder axis
+
+          // Map to text coordinates
+          float textScale = 1.5;
+          float textX = -angle * cylinderRadius / textScale;
+          float textY = -h / textScale + 0.34;  // negative h flips for viewer, +0.34 centers
+
+          // Sample 2D text SDF
+          float d2d = textSdf2D(vec2(textX, textY));
+
+          // Extrude radially inward from cylinder surface
+          float textDepth = 0.15;  // How deep to engrave
+          float surfaceDist = cylinderRadius - r;  // Distance from inner surface
+
+          // Combine 2D text with radial extrusion
+          vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
+          return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
+        }
+          
         float sceneSdf(vec3 p) {
           float dEphemeris = ephemerisSdf(p);
 

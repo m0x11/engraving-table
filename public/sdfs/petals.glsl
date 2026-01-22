@@ -4,6 +4,8 @@
 //////////////////////////////////////////////////////////
 
 #define PETALS_DEPTH 2.2
+#define PI 3.141592653589793
+
 
 float petalsSmin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -187,4 +189,11 @@ float petalsSdf(vec3 p, float time) {
     p.yz *= petalsRot(PI / 2.0);
     p.xy *= petalsRot(PI / 2.0);
     return petalsForm(p, seed, time);
+}
+
+
+float vineSdf(vec3 p, float time) {
+    p.yz *= petalsRot(PI / 2.0);
+    p.xy *= petalsRot(PI / 2.0);
+    return petalsForm(p, 1.0, time);
 }
