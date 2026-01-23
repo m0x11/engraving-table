@@ -15,8 +15,8 @@
 // showMeT: used for showMe animations and demo distance fields
 float showMeT() {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    return sin(tri * PI * 0.5);
-    //return 1.0;
+    //return sin(tri * PI * 0.5);
+    return 1.0;
 }
 
 // relicT: used for final interpolation between alt and mapScene
@@ -1033,6 +1033,130 @@ float alt(in vec3 p) {
   return sdTorusX(vec3(p.x, p.y, p.z), vec2(4.0, 0.5));
 }
 
+float altGrid(in vec3 p) {
+  // Grid parameters
+  p.x -= 3.;
+  float gridSize = 1.0;      // Size of each segment
+  float gapSize = 0.5;       // Width of the cuts/gaps
+
+  // Create the base torus
+  float torus = sdTorusX(p, vec2(4.0, 0.5));
+
+  // Create cutting planes along each axis
+  vec3 q = mod(p + gridSize * 0.5, gridSize) - gridSize * 0.5;
+  float cuts = -min(min(
+    abs(q.x) - (gridSize * 0.5 - gapSize * 0.5),
+    abs(q.y) - (gridSize * 0.5 - gapSize * 0.5)),
+    abs(q.z) - (gridSize * 0.5 - gapSize * 0.5)
+  );
+
+  // Combine torus with cuts
+  return max(sdBox(p, vec3(4., 4., 4.)), cuts);
+}
+
+// altStars: Grid of intersecting cylinders
+// - Vertical cylinders (along Y) in a grid on XZ plane
+// - Horizontal cylinders along X axis in a grid on YZ plane
+// - Horizontal cylinders along Z axis in a grid on XY plane
+// All soft-blended together with smin
+float altStars(in vec3 p) {
+  // Configurable parameters 
+
+  p.y += 3.75;
+  float spacing = 1.0;       // Distance between cylinder centers
+  float cylLength = 4.0;     // Half-length of each cylinder
+  float cylRadius = 0.01;    // Thickness/radius of cylinders
+  float blendK = 0.2;       // Smoothness of intersections
+
+  // Grid bounds (how many cylinders in each direction)
+  float gridExtent = 4.0;    // Creates cylinders from -gridExtent to +gridExtent
+
+  float d = 1e10;
+
+  // Vertical cylinders (along Y axis) - grid on XZ plane
+  vec3 qV = p;
+  qV.xz = mod(qV.xz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Cylinder along Y: use xz distance
+  float vertCyl = length(qV.xz) - cylRadius;
+  // Clamp to grid bounds and cylinder length
+  float boundsV = max(max(abs(p.x), abs(p.z)) - gridExtent, abs(p.y) - cylLength);
+  vertCyl = max(vertCyl, boundsV);
+  d = vertCyl;
+
+  // Horizontal cylinders along X axis - grid on YZ plane
+  vec3 qX = p;
+  qX.yz = mod(qX.yz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Cylinder along X: use yz distance
+  float horizCylX = length(qX.yz) - cylRadius;
+  // Clamp to grid bounds and cylinder length
+  float boundsX = max(max(abs(p.y), abs(p.z)) - gridExtent, abs(p.x) - cylLength);
+  horizCylX = max(horizCylX, boundsX);
+  d = smin(d, horizCylX, blendK);
+
+  // Horizontal cylinders along Z axis - grid on XY plane
+  vec3 qZ = p;
+  qZ.xy = mod(qZ.xy + spacing * 0.5, spacing) - spacing * 0.5;
+  // Cylinder along Z: use xy distance
+  float horizCylZ = length(qZ.xy) - cylRadius;
+  // Clamp to grid bounds and cylinder length
+  float boundsZ = max(max(abs(p.x), abs(p.y)) - gridExtent, abs(p.z) - cylLength);
+  horizCylZ = max(horizCylZ, boundsZ);
+  d = smin(d, horizCylZ, blendK);
+
+  return d;
+}
+
+// altStarsCapped: Grid of intersecting capsules (pill shapes)
+// Same structure as altStars but with rounded ends
+float altStarsCapped(in vec3 p) {
+  // Configurable parameters
+  p.y += 3.75;
+  float spacing = .5;       // Distance between capsule centers
+  float cylLength = 4.0;     // Half-length of each capsule
+  float cylRadius = 0.05;    // Thickness/radius of capsules
+  float blendK = 0.0;        // Smoothness of intersections
+
+  // Grid bounds
+  float gridExtent = 4.0;
+
+  float d = 1e10;
+
+  // Vertical capsules (along Y axis) - grid on XZ plane
+  vec3 qV = p;
+  qV.xz = mod(qV.xz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Capsule along Y: clamp Y to line segment, then distance to that point
+  float clampedY = clamp(qV.y, -cylLength, cylLength);
+  float vertCap = length(vec3(qV.x, qV.y - clampedY, qV.z)) - cylRadius;
+  // Clamp to grid bounds
+  float boundsV = max(abs(p.x), abs(p.z)) - gridExtent;
+  vertCap = max(vertCap, boundsV);
+  d = vertCap;
+
+  // Horizontal capsules along X axis - grid on YZ plane
+  vec3 qX = p;
+  qX.yz = mod(qX.yz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Capsule along X: clamp X to line segment
+  float clampedX = clamp(qX.x, -cylLength, cylLength);
+  float horizCapX = length(vec3(qX.x - clampedX, qX.y, qX.z)) - cylRadius;
+  // Clamp to grid bounds
+  float boundsX = max(abs(p.y), abs(p.z)) - gridExtent;
+  horizCapX = max(horizCapX, boundsX);
+  d = smin(d, horizCapX, blendK);
+
+  // Horizontal capsules along Z axis - grid on XY plane
+  vec3 qZ = p;
+  qZ.xy = mod(qZ.xy + spacing * 0.5, spacing) - spacing * 0.5;
+  // Capsule along Z: clamp Z to line segment
+  float clampedZ = clamp(qZ.z, -cylLength, cylLength);
+  float horizCapZ = length(vec3(qZ.x, qZ.y, qZ.z - clampedZ)) - cylRadius;
+  // Clamp to grid bounds
+  float boundsZ = max(abs(p.x), abs(p.y)) - gridExtent;
+  horizCapZ = max(horizCapZ, boundsZ);
+  d = smin(d, horizCapZ, blendK);
+
+  return d;
+}
+
 /*
 // Surface extraction
 float mapDistance(vec3 p) {
@@ -1049,15 +1173,18 @@ float mapDistance(vec3 p) {
 
 
 // DEMO 1 ANIMATION
+
+
 float mapDistance(vec3 p) {
     float t = relicT();
     float show = showMeHow(p);
-    return min(show, mix(alt(p), mapScene(p), t));
+    //return min(show, mix(alt(p), mapScene(p), t));
     //return show;
+    return  mix(mapScene(p), altStarsCapped(p), t);
 }
 
-// DEMO 2 ANIMATION
 
+// DEMO 2 ANIMATION
 /*
 float mapDistance(vec3 p) {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);

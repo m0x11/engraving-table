@@ -139,85 +139,95 @@ export default function Home() {
       fetch("/sdfs/common.glsl").then((res) => res.text()),
       fetch("/sdfs/petals.glsl").then((res) => res.text()),
       fetch("/sdfs/ephemeris.glsl").then((res) => res.text()),
-    ]).then(([fontData, commonGlsl, petalsGlsl, ephemerisGlsl]: [FontData, string, string, string]) => {
-      // Combine: common -> petals -> ephemeris (order matters for dependencies)
-      const combinedGlsl = commonGlsl + "\n" + petalsGlsl + "\n" + ephemerisGlsl;
+    ]).then(
+      ([fontData, commonGlsl, petalsGlsl, ephemerisGlsl]: [
+        FontData,
+        string,
+        string,
+        string,
+      ]) => {
+        // Combine: common -> petals -> ephemeris (order matters for dependencies)
+        const combinedGlsl =
+          commonGlsl + "\n" + petalsGlsl + "\n" + ephemerisGlsl;
 
-      // Process combined GLSL - rename functions and remove conflicting defines
-      const processedEphemeris = combinedGlsl
-        .replace(/mapDistance/g, "ephemerisSdf")
-        .replace(/mapScene/g, "ephemerisScene")
-        // Remove targetDate hardcoding - we'll inject it as uniform
-        .replace(/float targetDate = [^;]+;/g, "// targetDate injected as uniform")
-        // Remove conflicting raymarching constants (we define our own)
-        .replace(/#define MAX_STEPS \d+/g, "// MAX_STEPS defined above")
-        .replace(/#define MAX_DIST[^\n]*/g, "// MAX_DIST defined above")
-        .replace(/#define SURF_DIST[^\n]*/g, "// SURF_DIST defined above");
+        // Process combined GLSL - rename functions and remove conflicting defines
+        const processedEphemeris = combinedGlsl
+          .replace(/mapDistance/g, "ephemerisSdf")
+          .replace(/mapScene/g, "ephemerisScene")
+          // Remove targetDate hardcoding - we'll inject it as uniform
+          .replace(
+            /float targetDate = [^;]+;/g,
+            "// targetDate injected as uniform",
+          )
+          // Remove conflicting raymarching constants (we define our own)
+          .replace(/#define MAX_STEPS \d+/g, "// MAX_STEPS defined above")
+          .replace(/#define MAX_DIST[^\n]*/g, "// MAX_DIST defined above")
+          .replace(/#define SURF_DIST[^\n]*/g, "// SURF_DIST defined above");
 
-      // Build glyph lookup by character
-      const glyphMap = new Map<string, GlyphData>();
-      for (const glyph of fontData.glyphs) {
-        const char = String.fromCharCode(glyph.unicode);
-        glyphMap.set(char, glyph);
-      }
-
-      const scene = new THREE.Scene();
-      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
-      container.appendChild(renderer.domElement);
-
-      // Load MSDF texture
-      const textureLoader = new THREE.TextureLoader();
-      const msdfTexture = textureLoader.load(
-        "/fonts/PPRightSerifMono-msdf.png"
-      );
-      msdfTexture.minFilter = THREE.LinearFilter;
-      msdfTexture.magFilter = THREE.LinearFilter;
-      msdfTexture.flipY = true;
-
-      // Build glyph uniform data for the text
-      const glyphUniforms: { uv: THREE.Vector4; plane: THREE.Vector4 }[] = [];
-      const validChars: string[] = [];
-
-      for (const char of displayText) {
-        // Handle middle dot "·" by using period with vertical offset
-        const lookupChar = char === "·" ? "." : char;
-        const glyph = glyphMap.get(lookupChar);
-
-        if (glyph && glyph.atlasBounds && glyph.planeBounds) {
-          const uMin = glyph.atlasBounds.left / ATLAS_SIZE;
-          const uMax = glyph.atlasBounds.right / ATLAS_SIZE;
-          const vMin = glyph.atlasBounds.bottom / ATLAS_SIZE;
-          const vMax = glyph.atlasBounds.top / ATLAS_SIZE;
-
-          // Calculate vertical offset for middle dot
-          let verticalOffset = 0;
-          if (char === "·") {
-            const periodCenter =
-              (glyph.planeBounds.bottom + glyph.planeBounds.top) / 2;
-            const targetCenter = 0.34;
-            verticalOffset = targetCenter - periodCenter;
-          }
-
-          glyphUniforms.push({
-            uv: new THREE.Vector4(uMin, vMin, uMax, vMax),
-            plane: new THREE.Vector4(
-              glyph.planeBounds.left,
-              glyph.planeBounds.bottom + verticalOffset,
-              glyph.planeBounds.right,
-              glyph.planeBounds.top + verticalOffset
-            ),
-          });
-          validChars.push(char);
+        // Build glyph lookup by character
+        const glyphMap = new Map<string, GlyphData>();
+        for (const glyph of fontData.glyphs) {
+          const char = String.fromCharCode(glyph.unicode);
+          glyphMap.set(char, glyph);
         }
-      }
 
-      const numGlyphs = glyphUniforms.length;
-      const hasText = numGlyphs > 0;
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
 
-      const vertexShader = `
+        // Load MSDF texture
+        const textureLoader = new THREE.TextureLoader();
+        const msdfTexture = textureLoader.load(
+          "/fonts/PPRightSerifMono-msdf.png",
+        );
+        msdfTexture.minFilter = THREE.LinearFilter;
+        msdfTexture.magFilter = THREE.LinearFilter;
+        msdfTexture.flipY = true;
+
+        // Build glyph uniform data for the text
+        const glyphUniforms: { uv: THREE.Vector4; plane: THREE.Vector4 }[] = [];
+        const validChars: string[] = [];
+
+        for (const char of displayText) {
+          // Handle middle dot "·" by using period with vertical offset
+          const lookupChar = char === "·" ? "." : char;
+          const glyph = glyphMap.get(lookupChar);
+
+          if (glyph && glyph.atlasBounds && glyph.planeBounds) {
+            const uMin = glyph.atlasBounds.left / ATLAS_SIZE;
+            const uMax = glyph.atlasBounds.right / ATLAS_SIZE;
+            const vMin = glyph.atlasBounds.bottom / ATLAS_SIZE;
+            const vMax = glyph.atlasBounds.top / ATLAS_SIZE;
+
+            // Calculate vertical offset for middle dot
+            let verticalOffset = 0;
+            if (char === "·") {
+              const periodCenter =
+                (glyph.planeBounds.bottom + glyph.planeBounds.top) / 2;
+              const targetCenter = 0.34;
+              verticalOffset = targetCenter - periodCenter;
+            }
+
+            glyphUniforms.push({
+              uv: new THREE.Vector4(uMin, vMin, uMax, vMax),
+              plane: new THREE.Vector4(
+                glyph.planeBounds.left,
+                glyph.planeBounds.bottom + verticalOffset,
+                glyph.planeBounds.right,
+                glyph.planeBounds.top + verticalOffset,
+              ),
+            });
+            validChars.push(char);
+          }
+        }
+
+        const numGlyphs = glyphUniforms.length;
+        const hasText = numGlyphs > 0;
+
+        const vertexShader = `
         varying vec2 vUv;
         void main() {
           vUv = uv;
@@ -225,27 +235,27 @@ export default function Home() {
         }
       `;
 
-      // Build the getGlyph function dynamically
-      let getGlyphCode = "";
-      if (hasText) {
-        for (let i = 0; i < numGlyphs; i++) {
-          if (i === 0) {
-            getGlyphCode += `if (idx == 0) { plane = uGlyphPlane[0]; uv = uGlyphUV[0]; }\n`;
-          } else {
-            getGlyphCode += `        else if (idx == ${i}) { plane = uGlyphPlane[${i}]; uv = uGlyphUV[${i}]; }\n`;
+        // Build the getGlyph function dynamically
+        let getGlyphCode = "";
+        if (hasText) {
+          for (let i = 0; i < numGlyphs; i++) {
+            if (i === 0) {
+              getGlyphCode += `if (idx == 0) { plane = uGlyphPlane[0]; uv = uGlyphUV[0]; }\n`;
+            } else {
+              getGlyphCode += `        else if (idx == ${i}) { plane = uGlyphPlane[${i}]; uv = uGlyphUV[${i}]; }\n`;
+            }
           }
         }
-      }
 
-      // Build the textSdf2D function dynamically
-      let textSdfCode = "";
-      if (hasText) {
-        for (let i = 0; i < numGlyphs; i++) {
-          textSdfCode += `        d = min(d, glyphSdf2D(p - vec2(xStart + ${i.toFixed(1)} * advance, 0.0), ${i}));\n`;
+        // Build the textSdf2D function dynamically
+        let textSdfCode = "";
+        if (hasText) {
+          for (let i = 0; i < numGlyphs; i++) {
+            textSdfCode += `        d = min(d, glyphSdf2D(p - vec2(xStart + ${i.toFixed(1)} * advance, 0.0), ${i}));\n`;
+          }
         }
-      }
 
-      const fragmentShader = `
+        const fragmentShader = `
         precision highp float;
 
         uniform vec2 uResolution;
@@ -545,13 +555,17 @@ export default function Home() {
         float sceneSdf(vec3 p) {
           float dEphemeris = ephemerisSdf(p);
 
-          ${hasText ? `
+          ${
+            hasText
+              ? `
           float dForm = formOnInnerCylinder(p);
           float dText = textOnInnerCylinder(p);
           return max(dEphemeris, -dText);
-          ` : `
+          `
+              : `
           return dEphemeris;
-          `}
+          `
+          }
         }
 
         vec3 calcNormal(vec3 p) {
@@ -609,7 +623,7 @@ export default function Home() {
           vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
 
           // Camera setup - use orbit camera style for PBR mode
-          float cameraHeight = -6.0;  // Vertical offset for camera target
+          float cameraHeight = -3.75;  // Vertical offset for camera target
           float camDist = 6.0 / uZoom;
 
           mat3 rot = rotateY(uRotation.y) * rotateX(uRotation.x);
@@ -639,142 +653,146 @@ export default function Home() {
         }
       `;
 
-      const uniforms: Record<string, { value: unknown }> = {
-        uResolution: {
-          value: new THREE.Vector2(window.innerWidth, window.innerHeight),
-        },
-        uTime: { value: 0 },
-        uMsdfTexture: { value: msdfTexture },
-        uRotation: { value: new THREE.Vector3(0.3, 0.5, 0) },
-        uZoom: { value: 1.0 },
-        uTargetDate: { value: unixTimestamp },
-        uLightingMode: { value: lightingMode === "pbr" ? 0 : 1 },
-        // PBR params
-        uLight1Dir: { value: new THREE.Vector3(...pbrParams.light1Dir) },
-        uLight1Color: { value: new THREE.Vector3(...pbrParams.light1Color) },
-        uLight1Intensity: { value: pbrParams.light1Intensity },
-        uLight2Color: { value: new THREE.Vector3(...pbrParams.light2Color) },
-        uLight2Intensity: { value: pbrParams.light2Intensity },
-        uAmbientIntensity: { value: pbrParams.ambientIntensity },
-        uMetallic: { value: pbrParams.metallic },
-        uRoughness: { value: pbrParams.roughness },
-        // Simple params
-        uLightDir: { value: new THREE.Vector3(...simpleParams.lightDir) },
-        uDiffuseStrength: { value: simpleParams.diffuseStrength },
-      };
+        const uniforms: Record<string, { value: unknown }> = {
+          uResolution: {
+            value: new THREE.Vector2(window.innerWidth, window.innerHeight),
+          },
+          uTime: { value: 0 },
+          uMsdfTexture: { value: msdfTexture },
+          uRotation: { value: new THREE.Vector3(0.3, 0.5, 0) },
+          uZoom: { value: 1.0 },
+          uTargetDate: { value: unixTimestamp },
+          uLightingMode: { value: lightingMode === "pbr" ? 0 : 1 },
+          // PBR params
+          uLight1Dir: { value: new THREE.Vector3(...pbrParams.light1Dir) },
+          uLight1Color: { value: new THREE.Vector3(...pbrParams.light1Color) },
+          uLight1Intensity: { value: pbrParams.light1Intensity },
+          uLight2Color: { value: new THREE.Vector3(...pbrParams.light2Color) },
+          uLight2Intensity: { value: pbrParams.light2Intensity },
+          uAmbientIntensity: { value: pbrParams.ambientIntensity },
+          uMetallic: { value: pbrParams.metallic },
+          uRoughness: { value: pbrParams.roughness },
+          // Simple params
+          uLightDir: { value: new THREE.Vector3(...simpleParams.lightDir) },
+          uDiffuseStrength: { value: simpleParams.diffuseStrength },
+        };
 
-      if (hasText) {
-        uniforms.uGlyphUV = { value: glyphUniforms.map((g) => g.uv) };
-        uniforms.uGlyphPlane = { value: glyphUniforms.map((g) => g.plane) };
-      }
-
-      const material = new THREE.ShaderMaterial({
-        vertexShader,
-        fragmentShader,
-        uniforms,
-      });
-
-      // Store material ref for uniform updates
-      materialRef.current = material;
-
-      // Check for shader compilation errors
-      renderer.compile(scene, camera);
-      const gl = renderer.getContext();
-      const program = (
-        material as THREE.ShaderMaterial & {
-          program?: { program: WebGLProgram };
+        if (hasText) {
+          uniforms.uGlyphUV = { value: glyphUniforms.map((g) => g.uv) };
+          uniforms.uGlyphPlane = { value: glyphUniforms.map((g) => g.plane) };
         }
-      ).program;
-      if (program) {
-        const programInfo = gl.getProgramInfoLog(program.program);
-        if (programInfo) console.warn("Program info:", programInfo);
-      }
 
-      const geometry = new THREE.PlaneGeometry(2, 2);
-      const mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+        const material = new THREE.ShaderMaterial({
+          vertexShader,
+          fragmentShader,
+          uniforms,
+        });
 
-      // Mouse controls
-      let isDragging = false;
-      let previousMouse = { x: 0, y: 0 };
-      let rotation = { x: 0.3, y: 0.5 };
-      let zoom = 1.0;
+        // Store material ref for uniform updates
+        materialRef.current = material;
 
-      const handleMouseDown = (e: MouseEvent) => {
-        isDragging = true;
-        previousMouse = { x: e.clientX, y: e.clientY };
-      };
-
-      const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging) return;
-        const dx = e.clientX - previousMouse.x;
-        const dy = e.clientY - previousMouse.y;
-        rotation.y += dx * 0.005;
-        rotation.x += dy * 0.005;
-        rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotation.x));
-        previousMouse = { x: e.clientX, y: e.clientY };
-      };
-
-      const handleMouseUp = () => {
-        isDragging = false;
-      };
-
-      const handleWheel = (e: WheelEvent) => {
-        e.preventDefault();
-        zoom *= e.deltaY > 0 ? 0.95 : 1.05;
-        zoom = Math.max(0.3, Math.min(5.0, zoom));
-      };
-
-      container.addEventListener("mousedown", handleMouseDown);
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-      container.addEventListener("wheel", handleWheel, { passive: false });
-
-      const handleResize = () => {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        material.uniforms.uResolution.value.set(
-          window.innerWidth,
-          window.innerHeight
-        );
-      };
-      window.addEventListener("resize", handleResize);
-
-      const animate = () => {
-        animationId = requestAnimationFrame(animate);
-        material.uniforms.uTime.value += 0.016;
-        material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
-        material.uniforms.uZoom.value = zoom;
-        renderer.render(scene, camera);
-
-        // FPS calculation
-        fpsRef.current.frames++;
-        const now = performance.now();
-        if (now - fpsRef.current.lastTime >= 1000) {
-          setFps(fpsRef.current.frames);
-          fpsRef.current.frames = 0;
-          fpsRef.current.lastTime = now;
+        // Check for shader compilation errors
+        renderer.compile(scene, camera);
+        const gl = renderer.getContext();
+        const program = (
+          material as THREE.ShaderMaterial & {
+            program?: { program: WebGLProgram };
+          }
+        ).program;
+        if (program) {
+          const programInfo = gl.getProgramInfoLog(program.program);
+          if (programInfo) console.warn("Program info:", programInfo);
         }
-      };
-      animate();
 
-      // Store cleanup and material reference
-      const containerWithRefs = container as HTMLDivElement & {
-        cleanup?: () => void;
-        material?: THREE.ShaderMaterial;
-      };
-      containerWithRefs.material = material;
-      containerWithRefs.cleanup = () => {
-        container.removeEventListener("mousedown", handleMouseDown);
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-        container.removeEventListener("wheel", handleWheel);
-        window.removeEventListener("resize", handleResize);
-        cancelAnimationFrame(animationId);
-        container.removeChild(renderer.domElement);
-        renderer.dispose();
-        materialRef.current = null;
-      };
-    });
+        const geometry = new THREE.PlaneGeometry(2, 2);
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+
+        // Mouse controls
+        let isDragging = false;
+        let previousMouse = { x: 0, y: 0 };
+        let rotation = { x: 0.3, y: 0.5 };
+        let zoom = 1.0;
+
+        const handleMouseDown = (e: MouseEvent) => {
+          isDragging = true;
+          previousMouse = { x: e.clientX, y: e.clientY };
+        };
+
+        const handleMouseMove = (e: MouseEvent) => {
+          if (!isDragging) return;
+          const dx = e.clientX - previousMouse.x;
+          const dy = e.clientY - previousMouse.y;
+          rotation.y += dx * 0.005;
+          rotation.x += dy * 0.005;
+          rotation.x = Math.max(
+            -Math.PI / 2,
+            Math.min(Math.PI / 2, rotation.x),
+          );
+          previousMouse = { x: e.clientX, y: e.clientY };
+        };
+
+        const handleMouseUp = () => {
+          isDragging = false;
+        };
+
+        const handleWheel = (e: WheelEvent) => {
+          e.preventDefault();
+          zoom *= e.deltaY > 0 ? 0.95 : 1.05;
+          zoom = Math.max(0.3, Math.min(5.0, zoom));
+        };
+
+        container.addEventListener("mousedown", handleMouseDown);
+        window.addEventListener("mousemove", handleMouseMove);
+        window.addEventListener("mouseup", handleMouseUp);
+        container.addEventListener("wheel", handleWheel, { passive: false });
+
+        const handleResize = () => {
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          material.uniforms.uResolution.value.set(
+            window.innerWidth,
+            window.innerHeight,
+          );
+        };
+        window.addEventListener("resize", handleResize);
+
+        const animate = () => {
+          animationId = requestAnimationFrame(animate);
+          material.uniforms.uTime.value += 0.016;
+          material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
+          material.uniforms.uZoom.value = zoom;
+          renderer.render(scene, camera);
+
+          // FPS calculation
+          fpsRef.current.frames++;
+          const now = performance.now();
+          if (now - fpsRef.current.lastTime >= 1000) {
+            setFps(fpsRef.current.frames);
+            fpsRef.current.frames = 0;
+            fpsRef.current.lastTime = now;
+          }
+        };
+        animate();
+
+        // Store cleanup and material reference
+        const containerWithRefs = container as HTMLDivElement & {
+          cleanup?: () => void;
+          material?: THREE.ShaderMaterial;
+        };
+        containerWithRefs.material = material;
+        containerWithRefs.cleanup = () => {
+          container.removeEventListener("mousedown", handleMouseDown);
+          window.removeEventListener("mousemove", handleMouseMove);
+          window.removeEventListener("mouseup", handleMouseUp);
+          container.removeEventListener("wheel", handleWheel);
+          window.removeEventListener("resize", handleResize);
+          cancelAnimationFrame(animationId);
+          container.removeChild(renderer.domElement);
+          renderer.dispose();
+          materialRef.current = null;
+        };
+      },
+    );
 
     return () => {
       const cleanup = (container as HTMLDivElement & { cleanup?: () => void })
@@ -784,35 +802,38 @@ export default function Home() {
   }, [displayText, unixTimestamp, isValidDate]);
 
   // Slider component
-  const Slider = useCallback(({
-    label,
-    value,
-    min,
-    max,
-    step,
-    onChange
-  }: {
-    label: string;
-    value: number;
-    min: number;
-    max: number;
-    step: number;
-    onChange: (v: number) => void;
-  }) => (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="w-28 text-white/70">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-24 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer"
-      />
-      <span className="w-12 text-white/50">{value.toFixed(2)}</span>
-    </div>
-  ), []);
+  const Slider = useCallback(
+    ({
+      label,
+      value,
+      min,
+      max,
+      step,
+      onChange,
+    }: {
+      label: string;
+      value: number;
+      min: number;
+      max: number;
+      step: number;
+      onChange: (v: number) => void;
+    }) => (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-28 text-white/70">{label}</span>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="w-24 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer"
+        />
+        <span className="w-12 text-white/50">{value.toFixed(2)}</span>
+      </div>
+    ),
+    [],
+  );
 
   return (
     <div className="relative w-screen h-screen">
@@ -822,18 +843,22 @@ export default function Home() {
       />
       <div className="absolute top-4 left-4 bg-black/70 p-4 rounded-lg max-w-xs">
         {/* FPS Counter */}
-        <div className="text-white/50 text-xs mb-3 font-mono">{fps} FPS</div>
+        <div className="text-white/50 text-xs mb-3">{fps} FPS</div>
 
         {/* Date Input */}
         <div className="mb-4">
-          <label className="block text-white/70 text-xs mb-1">Date (mm-dd-yyyy)</label>
+          <label className="block text-white/70 text-xs mb-1">
+            Date (mm-dd-yyyy)
+          </label>
           <input
             type="text"
             value={dateInput}
             onChange={(e) => setDateInput(e.target.value)}
             placeholder="03-23-1999"
-            className={`w-full bg-white/10 text-white px-3 py-2 rounded border outline-none text-sm font-mono ${
-              isValidDate ? "border-white/20 focus:border-white/50" : "border-red-500/50"
+            className={`w-full bg-white/10 text-white px-3 py-2 rounded border outline-none text-sm ${
+              isValidDate
+                ? "border-white/20 focus:border-white/50"
+                : "border-red-500/50"
             }`}
           />
           {isValidDate && (
@@ -845,7 +870,9 @@ export default function Home() {
 
         {/* Lighting Mode Toggle */}
         <div className="mb-4">
-          <label className="block text-white/70 text-xs mb-2">Lighting Mode</label>
+          <label className="block text-white/70 text-xs mb-2">
+            Lighting Mode
+          </label>
           <div className="flex gap-2">
             <button
               onClick={() => setLightingMode("pbr")}
@@ -880,7 +907,12 @@ export default function Home() {
               min={-3}
               max={3}
               step={0.1}
-              onChange={(v) => setPbrParams((p) => ({ ...p, light1Dir: [v, p.light1Dir[1], p.light1Dir[2]] }))}
+              onChange={(v) =>
+                setPbrParams((p) => ({
+                  ...p,
+                  light1Dir: [v, p.light1Dir[1], p.light1Dir[2]],
+                }))
+              }
             />
             <Slider
               label="Light 1 Y"
@@ -888,7 +920,12 @@ export default function Home() {
               min={-3}
               max={3}
               step={0.1}
-              onChange={(v) => setPbrParams((p) => ({ ...p, light1Dir: [p.light1Dir[0], v, p.light1Dir[2]] }))}
+              onChange={(v) =>
+                setPbrParams((p) => ({
+                  ...p,
+                  light1Dir: [p.light1Dir[0], v, p.light1Dir[2]],
+                }))
+              }
             />
             <Slider
               label="Light 1 Z"
@@ -896,7 +933,12 @@ export default function Home() {
               min={-3}
               max={3}
               step={0.1}
-              onChange={(v) => setPbrParams((p) => ({ ...p, light1Dir: [p.light1Dir[0], p.light1Dir[1], v] }))}
+              onChange={(v) =>
+                setPbrParams((p) => ({
+                  ...p,
+                  light1Dir: [p.light1Dir[0], p.light1Dir[1], v],
+                }))
+              }
             />
             <Slider
               label="Light 1 Intensity"
@@ -904,7 +946,9 @@ export default function Home() {
               min={0}
               max={20}
               step={0.1}
-              onChange={(v) => setPbrParams((p) => ({ ...p, light1Intensity: v }))}
+              onChange={(v) =>
+                setPbrParams((p) => ({ ...p, light1Intensity: v }))
+              }
             />
             <Slider
               label="Light 2 Intensity"
@@ -912,7 +956,9 @@ export default function Home() {
               min={0}
               max={50}
               step={0.5}
-              onChange={(v) => setPbrParams((p) => ({ ...p, light2Intensity: v }))}
+              onChange={(v) =>
+                setPbrParams((p) => ({ ...p, light2Intensity: v }))
+              }
             />
             <Slider
               label="Ambient"
@@ -920,7 +966,9 @@ export default function Home() {
               min={0}
               max={0.5}
               step={0.01}
-              onChange={(v) => setPbrParams((p) => ({ ...p, ambientIntensity: v }))}
+              onChange={(v) =>
+                setPbrParams((p) => ({ ...p, ambientIntensity: v }))
+              }
             />
             <Slider
               label="Metallic"
@@ -951,7 +999,9 @@ export default function Home() {
               min={0}
               max={2}
               step={0.1}
-              onChange={(v) => setSimpleParams((p) => ({ ...p, diffuseStrength: v }))}
+              onChange={(v) =>
+                setSimpleParams((p) => ({ ...p, diffuseStrength: v }))
+              }
             />
             <Slider
               label="Light X"
@@ -959,7 +1009,12 @@ export default function Home() {
               min={-3}
               max={3}
               step={0.1}
-              onChange={(v) => setSimpleParams((p) => ({ ...p, lightDir: [v, p.lightDir[1], p.lightDir[2]] }))}
+              onChange={(v) =>
+                setSimpleParams((p) => ({
+                  ...p,
+                  lightDir: [v, p.lightDir[1], p.lightDir[2]],
+                }))
+              }
             />
             <Slider
               label="Light Y"
@@ -967,7 +1022,12 @@ export default function Home() {
               min={-3}
               max={3}
               step={0.1}
-              onChange={(v) => setSimpleParams((p) => ({ ...p, lightDir: [p.lightDir[0], v, p.lightDir[2]] }))}
+              onChange={(v) =>
+                setSimpleParams((p) => ({
+                  ...p,
+                  lightDir: [p.lightDir[0], v, p.lightDir[2]],
+                }))
+              }
             />
             <Slider
               label="Light Z"
@@ -975,7 +1035,12 @@ export default function Home() {
               min={-3}
               max={3}
               step={0.1}
-              onChange={(v) => setSimpleParams((p) => ({ ...p, lightDir: [p.lightDir[0], p.lightDir[1], v] }))}
+              onChange={(v) =>
+                setSimpleParams((p) => ({
+                  ...p,
+                  lightDir: [p.lightDir[0], p.lightDir[1], v],
+                }))
+              }
             />
           </div>
         )}
