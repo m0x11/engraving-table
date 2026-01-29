@@ -66,9 +66,32 @@ function dateToDisplayText(dateStr: string): string {
   return `${month}·${day}·${year}`;
 }
 
+// Convert Unix timestamp to display format: "NOV 11 2025"
+function unixToDisplayDate(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  const months = [
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+  ];
+  const month = months[date.getUTCMonth()];
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `${month} ${day} ${year}`;
+}
+
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dateInput, setDateInput] = useState("01-22-2026");
+  const [dateInput, setDateInput] = useState("01-01-2000");
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
   const [pbrParams, setPbrParams] = useState<PBRParams>({
     numReflections: 1,
@@ -88,6 +111,16 @@ export default function Home() {
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
   const [showSliders, setShowSliders] = useState(true);
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoDisplayDate, setDemoDisplayDate] = useState("");
+  const demoTimeRef = useRef(0);
+  const demoModeRef = useRef(false);
+  const baseTimestampRef = useRef(0);
+  const [lightZAnimating, setLightZAnimating] = useState(false);
+  const lightZAnimationRef = useRef<{
+    startTime: number;
+    startValue: number;
+  } | null>(null);
 
   // Toggle sliders with "h" key
   useEffect(() => {
@@ -104,6 +137,54 @@ export default function Home() {
   const unixTimestamp = parseDateToUnix(dateInput);
   const displayText = dateToDisplayText(dateInput);
   const isValidDate = unixTimestamp !== null;
+
+  // Sync demo mode to ref and reset demo time when toggled on
+  useEffect(() => {
+    demoModeRef.current = demoMode;
+    if (demoMode && unixTimestamp !== null) {
+      demoTimeRef.current = 0;
+      baseTimestampRef.current = unixTimestamp;
+      setDemoDisplayDate(unixToDisplayDate(unixTimestamp));
+    }
+  }, [demoMode, unixTimestamp]);
+
+  // Light Z animation effect
+  useEffect(() => {
+    if (!lightZAnimating) return;
+
+    const duration = 3000; // 3 seconds
+    let animationId: number;
+
+    const animate = () => {
+      if (!lightZAnimationRef.current) return;
+
+      const elapsed = performance.now() - lightZAnimationRef.current.startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // Ease out quint for very graceful deceleration
+      const eased = 1 - Math.pow(1 - progress, 5);
+
+      const newZ =
+        lightZAnimationRef.current.startValue * (1 - eased) + 0 * eased;
+
+      setPbrParams((p) => ({
+        ...p,
+        light1Dir: [p.light1Dir[0], p.light1Dir[1], newZ],
+      }));
+
+      if (progress < 1) {
+        animationId = requestAnimationFrame(animate);
+      } else {
+        setLightZAnimating(false);
+        lightZAnimationRef.current = null;
+      }
+    };
+
+    animationId = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [lightZAnimating]);
 
   // Ref to store the material for uniform updates
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
@@ -623,7 +704,8 @@ export default function Home() {
           vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
 
           // Camera setup - use orbit camera style for PBR mode
-          float cameraHeight = -3.75;  // Vertical offset for camera target
+          float cameraHeight = 0.0;  // Vertical offset for camera target
+          //float cameraHeight = -3.75;  // Vertical offset for camera target
           float camDist = 6.0 / uZoom;
 
           mat3 rot = rotateY(uRotation.y) * rotateX(uRotation.x);
@@ -756,11 +838,31 @@ export default function Home() {
         };
         window.addEventListener("resize", handleResize);
 
+        let lastDemoUpdate = 0;
         const animate = () => {
           animationId = requestAnimationFrame(animate);
           material.uniforms.uTime.value += 0.016;
           material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
           material.uniforms.uZoom.value = zoom;
+
+          // Demo mode: rapidly advance the date
+          if (demoModeRef.current) {
+            // Advance by ~3 days per frame at 60fps = ~180 days/second
+            const daysPerFrame = 0.25;
+            const secondsPerDay = 86400;
+            demoTimeRef.current += daysPerFrame * secondsPerDay;
+            const currentTimestamp =
+              baseTimestampRef.current + demoTimeRef.current;
+            material.uniforms.uTargetDate.value = currentTimestamp;
+
+            // Update display date every ~100ms to avoid excessive state updates
+            const now = performance.now();
+            if (now - lastDemoUpdate > 100) {
+              setDemoDisplayDate(unixToDisplayDate(currentTimestamp));
+              lastDemoUpdate = now;
+            }
+          }
+
           renderer.render(scene, camera);
 
           // FPS calculation
@@ -865,6 +967,38 @@ export default function Home() {
             <div className="text-white/50 text-xs mt-1">
               Engraving: {displayText}
             </div>
+          )}
+        </div>
+
+        {/* Demo Mode Toggle */}
+        <div className="mb-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={demoMode}
+              onChange={(e) => setDemoMode(e.target.checked)}
+              className="w-4 h-4 rounded bg-white/10 border-white/20 text-white accent-white"
+            />
+            <span className="text-white/70 text-xs">Demo Mode</span>
+          </label>
+          {demoMode && (
+            <button
+              onClick={() => {
+                lightZAnimationRef.current = {
+                  startTime: performance.now(),
+                  startValue: pbrParams.light1Dir[2],
+                };
+                setLightZAnimating(true);
+              }}
+              disabled={lightZAnimating}
+              className={`mt-2 px-3 py-1 text-xs rounded ${
+                lightZAnimating
+                  ? "bg-white/10 text-white/30 cursor-not-allowed"
+                  : "bg-white/20 text-white/70 hover:bg-white/30"
+              }`}
+            >
+              {lightZAnimating ? "Animating..." : "Light Z to 0"}
+            </button>
           )}
         </div>
 
@@ -1045,6 +1179,22 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Demo Mode Date Overlay */}
+      {demoMode && demoDisplayDate && (
+        <div className="absolute top-64 left-1/2 -translate-x-1/2 pointer-events-none">
+          <div
+            className="text-white text-7xl tracking-wider font-light"
+            style={{
+              fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
+              textShadow:
+                "0 4px 20px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.9)",
+            }}
+          >
+            {demoDisplayDate}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

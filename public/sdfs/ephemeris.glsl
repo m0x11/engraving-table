@@ -15,8 +15,8 @@
 // showMeT: used for showMe animations and demo distance fields
 float showMeT() {
     float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
-    //return sin(tri * PI * 0.5);
-    return 1.0;
+    return sin(tri * PI * 0.5);
+    //return 1.0;
 }
 
 // relicT: used for final interpolation between alt and mapScene
@@ -890,8 +890,8 @@ float showMeHow(vec3 p) {
     //float targetDate = mix(902188183., 922188183., t);
     //float targetDate = mix(972347471., 942347471., t); 
     //float internalTargetDate = mix(200992043471., 	200928971471., t); 
-    float internalTargetDate = mix(1869109071., 1769109071., t);
-
+    //float internalTargetDate = mix(1869109071., 1769109071., t);
+    float internalTargetDate = 	mix(992347471., 	942347471., t);
 
     // 1) Transform to bowl space
     vec3 transformedP = transformToBowl(p);
@@ -1178,9 +1178,9 @@ float mapDistance(vec3 p) {
 float mapDistance(vec3 p) {
     float t = relicT();
     float show = showMeHow(p);
-    //return min(show, mix(alt(p), mapScene(p), t));
+    return min(show, mix(alt(p), mapScene(p), t));
     //return show;
-    return  mix(mapScene(p), altStarsCapped(p), t);
+    //return  mix(mapScene(p), altStarsCapped(p), t);
 }
 
 
