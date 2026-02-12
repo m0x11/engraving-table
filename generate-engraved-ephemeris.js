@@ -57,8 +57,9 @@ function parseDateToUnix(dateStr) {
   return Math.floor(date.getTime() / 1000);
 }
 
-function formatDateWithDots(dateStr) {
-  // Convert "mm-dd-yyyy" to "mm·dd·yyyy"
+function formatDateWithDots(dateStr, dateFormat = 'mdy') {
+  // Convert "mm-dd-yyyy" to display text with middle dots
+  // dateFormat: 'mdy' => "mm·dd·yyyy", 'dmy' => "dd·mm·yyyy"
   const match = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (!match) {
     throw new Error(`Invalid date format: ${dateStr}`);
@@ -68,6 +69,9 @@ function formatDateWithDots(dateStr) {
   const day = match[2].padStart(2, '0');
   const year = match[3];
 
+  if (dateFormat === 'dmy') {
+    return `${day}·${month}·${year}`;
+  }
   return `${month}·${day}·${year}`;
 }
 
@@ -281,11 +285,13 @@ Arguments:
 Options:
   --resolution <n>    Resolution (default: 600, creates 600x600x600)
   --name <name>       Output folder name (default: ephemeris-<date>)
+  --date-format <fmt> Display format: 'mdy' (mm·dd·yyyy) or 'dmy' (dd·mm·yyyy) (default: mdy)
 
 Examples:
   node generate-engraved-ephemeris.js 01-15-2024
   node generate-engraved-ephemeris.js 12-25-1999 --resolution 400
   node generate-engraved-ephemeris.js 07-04-1776 --name independence-ring
+  node generate-engraved-ephemeris.js 25-12-1999 --date-format dmy
 `);
     process.exit(0);
   }
@@ -294,12 +300,19 @@ Examples:
   const dateStr = args[0];
   let resolution = 600;
   let outputName = null;
+  let dateFormat = 'mdy';
 
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '--resolution' && args[i + 1]) {
       resolution = parseInt(args[++i]);
     } else if (args[i] === '--name' && args[i + 1]) {
       outputName = args[++i];
+    } else if (args[i] === '--date-format' && args[i + 1]) {
+      dateFormat = args[++i];
+      if (dateFormat !== 'mdy' && dateFormat !== 'dmy') {
+        console.error(`Error: --date-format must be 'mdy' or 'dmy', got '${dateFormat}'`);
+        process.exit(1);
+      }
     }
   }
 
@@ -307,18 +320,19 @@ Examples:
   let unixTime, displayText;
   try {
     unixTime = parseDateToUnix(dateStr);
-    displayText = formatDateWithDots(dateStr);
+    displayText = formatDateWithDots(dateStr, dateFormat);
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exit(1);
   }
 
   if (!outputName) {
-    outputName = `ephemeris-${dateStr.replace(/-/g, '')}`;
+    outputName = `ephemeris-${dateStr.replace(/-/g, '')}${dateFormat === 'dmy' ? '-dmy' : ''}`;
   }
 
   console.log(`\n📅 Generating engraved ephemeris ring`);
   console.log(`   Date: ${dateStr}`);
+  console.log(`   Display format: ${dateFormat === 'dmy' ? 'dd·mm·yyyy' : 'mm·dd·yyyy'}`);
   console.log(`   Display text: ${displayText}`);
   console.log(`   Unix timestamp: ${unixTime}`);
   console.log(`   Resolution: ${resolution}x${resolution}x${resolution}`);
@@ -370,7 +384,8 @@ Examples:
     hasTexture: true,
     date: dateStr,
     unixTime: unixTime,
-    displayText: displayText
+    displayText: displayText,
+    ...(dateFormat === 'dmy' ? { dateFormat: 'dmy' } : {})
   };
   const paramsPath = path.join(sdfDir, 'params.json');
   fs.writeFileSync(paramsPath, JSON.stringify(params, null, 2));

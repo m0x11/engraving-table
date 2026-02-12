@@ -54,8 +54,9 @@ function parseDateToUnix(dateStr: string): number | null {
   return Math.floor(date.getTime() / 1000);
 }
 
-// Convert date string to display text with middle dots (MM·DD·YYYY)
-function dateToDisplayText(dateStr: string): string {
+// Convert date string to display text with middle dots
+// dateFormat: 'mdy' => MM·DD·YYYY, 'dmy' => DD·MM·YYYY
+function dateToDisplayText(dateStr: string, dateFormat: "mdy" | "dmy" = "mdy"): string {
   const match = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (!match) return "";
 
@@ -63,6 +64,9 @@ function dateToDisplayText(dateStr: string): string {
   const day = match[2].padStart(2, "0");
   const year = match[3];
 
+  if (dateFormat === "dmy") {
+    return `${day}·${month}·${year}`;
+  }
   return `${month}·${day}·${year}`;
 }
 
@@ -92,6 +96,7 @@ function unixToDisplayDate(timestamp: number): string {
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dateInput, setDateInput] = useState("01-01-2000");
+  const [dateFormat, setDateFormat] = useState<"mdy" | "dmy">("mdy");
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
   const [pbrParams, setPbrParams] = useState<PBRParams>({
     numReflections: 1,
@@ -135,7 +140,7 @@ export default function Home() {
 
   // Compute derived values
   const unixTimestamp = parseDateToUnix(dateInput);
-  const displayText = dateToDisplayText(dateInput);
+  const displayText = dateToDisplayText(dateInput, dateFormat);
   const isValidDate = unixTimestamp !== null;
 
   // Sync demo mode to ref and reset demo time when toggled on
@@ -963,6 +968,28 @@ export default function Home() {
                 : "border-red-500/50"
             }`}
           />
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => setDateFormat("mdy")}
+              className={`px-2 py-1 text-xs rounded ${
+                dateFormat === "mdy"
+                  ? "bg-white/30 text-white"
+                  : "bg-white/10 text-white/50 hover:bg-white/20"
+              }`}
+            >
+              MM·DD·YYYY
+            </button>
+            <button
+              onClick={() => setDateFormat("dmy")}
+              className={`px-2 py-1 text-xs rounded ${
+                dateFormat === "dmy"
+                  ? "bg-white/30 text-white"
+                  : "bg-white/10 text-white/50 hover:bg-white/20"
+              }`}
+            >
+              DD·MM·YYYY
+            </button>
+          </div>
           {isValidDate && (
             <div className="text-white/50 text-xs mt-1">
               Engraving: {displayText}
