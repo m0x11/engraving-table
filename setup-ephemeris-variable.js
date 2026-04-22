@@ -6,7 +6,7 @@
  *
  * The resulting SDF accepts uniforms:
  * - uTargetDate: Unix timestamp for planetary positions
- * - uGlyphIndices[10]: Which glyph to use at each position (0-9 = digits, 10 = middle dot)
+ * - uGlyphIndices[11]: Which glyph to use at each position (0-9 = digits, 10 = middle dot, 11+ = letters)
  */
 
 const fs = require('fs');
@@ -16,11 +16,18 @@ const { PNG } = require('pngjs');
 // Configuration
 const FONT_JSON_PATH = path.join(__dirname, 'public/fonts/PPRightSerifMono-msdf.json');
 const FONT_PNG_PATH = path.join(__dirname, 'public/fonts/PPRightSerifMono-msdf.png');
+const COMMON_PATH = path.join(__dirname, 'public/sdfs/common.glsl');
 const EPHEMERIS_PATH = path.join(__dirname, 'public/sdfs/ephemeris.glsl');
 const OUTPUT_DIR = path.join(__dirname, '..', 'sdfs', 'ephemeris-variable');
 
-// Characters we need: 0-9 and middle dot (·)
-const GLYPH_CHARS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '·'];
+// Characters we need: 0-9, middle dot (·), and uppercase letters for month abbreviations
+// Month abbrevs: JAN, FEB, MAR, APR, MAY, JUN, JUL, AUG, SEP, OCT, NOV, DEC
+// Unique letters: A, B, C, D, E, F, G, J, L, M, N, O, P, R, S, T, U, V, Y
+const GLYPH_CHARS = [
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '·',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'J', 'L',
+  'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'V', 'Y'
+];
 
 function loadFontData() {
   const jsonData = JSON.parse(fs.readFileSync(FONT_JSON_PATH, 'utf8'));
@@ -123,12 +130,12 @@ float glyphSdf${i}(vec2 p) {
 
   const textGlsl = `
 // ========== TEXT SDF FUNCTIONS ==========
-// Glyph indices: 0-9 = digits '0'-'9', 10 = middle dot '·'
+// Glyph indices: 0-9 = digits, 10 = middle dot, 11+ = uppercase letters for month abbreviations
 // Note: uTargetDate and uGlyphIndices uniforms are injected via textureDeclarations at runtime
 
 #define PX_RANGE 8.0
 #define GLYPH_SIZE 48.0
-#define NUM_POSITIONS 10
+#define NUM_POSITIONS 11
 
 float median(vec3 v) {
   return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
@@ -190,7 +197,7 @@ float textOnInnerCylinder(vec3 p) {
 
   float d2d = textSdf2D(vec2(textX, textY));
 
-  float textDepth = 0.15;
+  float textDepth = 0.1665;
   float surfaceDist = cylinderRadius - r;
 
   vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
@@ -203,35 +210,70 @@ float textOnInnerCylinder(vec3 p) {
 }
 
 function generateCombinedSDF(ephemerisCode, textGlsl) {
-  // Replace hardcoded targetDate with uniform reference
-  let modifiedEphemeris = ephemerisCode.replace(
-    /float targetDate = [\d.-]+;/,
-    'float targetDate = uTargetDate;'
-  );
+  let modifiedEphemeris = ephemerisCode;
 
-  // Insert text GLSL before mapScene function
-  const mapSceneIndex = modifiedEphemeris.indexOf('float mapScene(');
-  if (mapSceneIndex === -1) {
+  // Stub out uTime (animation timer not needed for static mesh generation)
+  modifiedEphemeris = '#define uTime 0.0\n' + modifiedEphemeris;
+
+  // Add global targetDate declaration from uniform (used as free variable throughout shader)
+  // Must come after common.glsl but before any function that uses targetDate
+  const depthIndex = modifiedEphemeris.indexOf('#define DEPTH');
+  if (depthIndex === -1) {
+    throw new Error('Could not find #define DEPTH in ephemeris code');
+  }
+  const depthLineEnd = modifiedEphemeris.indexOf('\n', depthIndex);
+  modifiedEphemeris = modifiedEphemeris.slice(0, depthLineEnd + 1) +
+    '\n// targetDate set from uniform for mesh generation\nfloat targetDate = uTargetDate;\n' +
+    '// Stub for viewer-only function (must be before stampHand which calls it)\nfloat petalsSdf(vec3 p, float s) { return 1e10; }\n' +
+    modifiedEphemeris.slice(depthLineEnd + 1);
+
+  const mapSceneSearch = 'float mapScene(';
+  const firstMapScene = modifiedEphemeris.indexOf(mapSceneSearch);
+  if (firstMapScene === -1) {
     throw new Error('Could not find mapScene function in ephemeris code');
   }
 
-  const beforeMapScene = modifiedEphemeris.slice(0, mapSceneIndex);
-  const afterMapScene = modifiedEphemeris.slice(mapSceneIndex);
+  // Insert text GLSL before the second mapScene (the production one)
+  // Find the second mapScene function (first is showMe/demo, second is production)
+  const secondMapScene = modifiedEphemeris.indexOf(mapSceneSearch, firstMapScene + 1);
+  const insertPoint = secondMapScene !== -1 ? secondMapScene : firstMapScene;
+
+  const beforeMapScene = modifiedEphemeris.slice(0, insertPoint);
+  const afterMapScene = modifiedEphemeris.slice(insertPoint);
 
   let combinedCode = beforeMapScene + textGlsl + afterMapScene;
 
-  // Modify mapDistance to engrave text
-  combinedCode = combinedCode.replace(
-    /float mapDistance\(vec3 p\) \{\s*return mapScene\(p\);\s*\}/,
-    `float mapDistance(vec3 p) {
+  // Rename all uncommented mapDistance functions to _disabled_mapDistance
+  // so they don't conflict with our engraving version.
+  // Block-commented ones are already inactive and left as-is.
+  // Walk the code tracking block comment depth to only rename uncommented ones.
+  let lines = combinedCode.split('\n');
+  let inBlockComment = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('/*')) inBlockComment = true;
+    if (!inBlockComment) {
+      lines[i] = lines[i].replace(
+        /^(float mapDistance\()/,
+        'float _disabled_mapDistance('
+      );
+    }
+    if (lines[i].includes('*/')) inBlockComment = false;
+  }
+  combinedCode = lines.join('\n');
+
+  // Append our engraving mapDistance at the end
+  combinedCode += `
+
+// ========== MESH GENERATION mapDistance ==========
+float mapDistance(vec3 p) {
   // Apply Y offset to keep ring in view
   p.y -= 4.0;
 
   float dRing = mapScene(p);
   float dText = textOnInnerCylinder(p);
   return max(dRing, -dText);
-}`
-  );
+}
+`;
 
   return combinedCode;
 }
@@ -244,10 +286,12 @@ async function main() {
   const fontData = loadFontData();
   console.log(`   Atlas size: ${fontData.atlasWidth}x${fontData.atlasHeight}`);
 
-  // Load ephemeris shader
-  console.log('📂 Loading ephemeris shader...');
-  const ephemerisCode = fs.readFileSync(EPHEMERIS_PATH, 'utf8');
-  console.log(`   Loaded ${ephemerisCode.length} characters`);
+  // Load common utilities and ephemeris shader
+  console.log('📂 Loading shaders...');
+  const commonCode = fs.readFileSync(COMMON_PATH, 'utf8');
+  const ephemerisRaw = fs.readFileSync(EPHEMERIS_PATH, 'utf8');
+  const ephemerisCode = commonCode + '\n' + ephemerisRaw;
+  console.log(`   Loaded common.glsl (${commonCode.length} chars) + ephemeris.glsl (${ephemerisRaw.length} chars)`);
 
   // Generate text GLSL with all digit glyphs
   console.log('⚙️  Generating text SDF code with all glyphs...');
@@ -283,7 +327,11 @@ async function main() {
     glyphMap: {
       '0': 0, '1': 1, '2': 2, '3': 3, '4': 4,
       '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
-      '·': 10
+      '·': 10,
+      'A': 11, 'B': 12, 'C': 13, 'D': 14, 'E': 15,
+      'F': 16, 'G': 17, 'J': 18, 'L': 19, 'M': 20,
+      'N': 21, 'O': 22, 'P': 23, 'R': 24, 'S': 25,
+      'T': 26, 'U': 27, 'V': 28, 'Y': 29
     }
   };
   const paramsPath = path.join(OUTPUT_DIR, 'params.json');
