@@ -18,6 +18,7 @@ type FontData = {
 };
 
 type LightingMode = "pbr" | "simple";
+type AnimationMode = "text" | "form" | "ring";
 
 type PBRParams = {
   numReflections: number;
@@ -93,10 +94,304 @@ function unixToDisplayDate(timestamp: number): string {
   return `${month} ${day} ${year}`;
 }
 
+// Ephemeris constants and computation (mirrors GLSL logic)
+const J2000_UNIX = 946728000.0;
+const SECONDS_PER_DAY = 86400.0;
+const SYSTEM_SCALE = 1.32;
+
+const PLANETS = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"] as const;
+
+const SEMI_MAJOR_AXES = [0.33, 0.60, 0.87, 1.13, 1.40, 1.67, 1.93, 2.20];
+const ASCENDING_NODES = [48.331, 76.680, -11.261, 49.558, 100.464, 113.665, 74.006, 131.783];
+const ARG_PERIHELION = [77.456, 131.533, 102.947, 336.041, 14.331, 92.432, 170.964, 44.971];
+const MEAN_LONGITUDES = [252.25, 181.98, 100.46, 355.45, 34.40, 49.94, 313.23, 304.88];
+const ORBITAL_PERIODS = [87.969, 224.701, 365.256, 686.980, 4332.589, 10759.22, 30688.5, 60182.0];
+const ORBITS_ENABLED = [1, 0, 1, 0, 0, 0, 0, 1];
+
+const MOON_ORBITAL_PERIOD = 27.321661;
+
+function computeEphemerisData(unixTimestamp: number) {
+  const daysFromJ2000 = (unixTimestamp - J2000_UNIX) / SECONDS_PER_DAY;
+  const date = new Date(unixTimestamp * 1000);
+
+  const planets = PLANETS.map((name, i) => {
+    const period = ORBITAL_PERIODS[i];
+    const meanMotion = (2 * Math.PI) / period;
+    const angle = ((meanMotion * daysFromJ2000) + (MEAN_LONGITUDES[i] * Math.PI / 180)) % (2 * Math.PI);
+    const angleDeg = ((angle * 180 / Math.PI) % 360 + 360) % 360;
+    const radius = SEMI_MAJOR_AXES[i] * SYSTEM_SCALE;
+    const x = -radius * Math.cos(angle);
+    const z = radius * Math.sin(angle);
+
+    return {
+      name,
+      semiMajorAxis: SEMI_MAJOR_AXES[i],
+      ascendingNode: ASCENDING_NODES[i],
+      argPerihelion: ARG_PERIHELION[i],
+      meanLongitude: MEAN_LONGITUDES[i],
+      orbitalPeriod: period,
+      orbitEnabled: ORBITS_ENABLED[i],
+      angle: angleDeg,
+      posX: x,
+      posZ: z,
+      radius,
+    };
+  });
+
+  // Moon
+  const earthAngle = ((((2 * Math.PI) / ORBITAL_PERIODS[2]) * daysFromJ2000) + (MEAN_LONGITUDES[2] * Math.PI / 180)) % (2 * Math.PI);
+  const moonAngle = ((2 * Math.PI * daysFromJ2000) / MOON_ORBITAL_PERIOD + Math.PI) % (2 * Math.PI);
+  const moonAngleDeg = ((moonAngle * 180 / Math.PI) % 360 + 360) % 360;
+
+  return {
+    unixTimestamp,
+    dateUTC: date.toISOString().replace("T", " ").slice(0, 19) + " UTC",
+    daysFromJ2000,
+    j2000Unix: J2000_UNIX,
+    systemScale: SYSTEM_SCALE,
+    planets,
+    moonAngle: moonAngleDeg,
+    moonPeriod: MOON_ORBITAL_PERIOD,
+  };
+}
+
+function formatEphemerisText(timestamp: number, compact: boolean): string {
+  const data = computeEphemerisData(timestamp);
+  const pad = (s: string, n: number) => s.padEnd(n);
+  const padN = (n: number, w: number, d: number = 2) => n.toFixed(d).padStart(w);
+  const padL = (n: number, w: number, d: number = 2) => n.toFixed(d).padEnd(w);
+  const sep = "*".repeat(62);
+
+  const livePositions = `LIVE POSITIONS (target date)
+${sep}
+${pad("Planet", 9)} ${pad("Angle°", 8)} ${pad("X", 8)} ${pad("Z", 8)}
+${sep}
+${data.planets.map(p =>
+  `${pad(p.name, 9)} ${padL(p.angle, 8)} ${padL(p.posX, 8, 3)} ${padL(p.posZ, 8, 3)}`
+).join("\n")}
+${sep}
+Moon        Angle: ${padN(data.moonAngle, 7)}°`;
+
+  if (compact) return livePositions;
+
+  return `EPHEMERIS DATA
+${sep}
+Date            ${data.dateUTC}
+Unix Timestamp  ${data.unixTimestamp.toFixed(0)}
+Days from J2000 ${padN(data.daysFromJ2000, 12, 3)}
+J2000 Epoch     ${data.j2000Unix.toFixed(0)} (Jan 1 2000 12:00 UTC)
+System Scale    ${data.systemScale}
+${sep}
+
+ORBITAL PARAMETERS
+${sep}
+${pad("Planet", 9)} ${pad("a", 5)} ${pad("Ω°", 8)} ${pad("ω°", 8)} ${pad("L₀°", 8)} ${pad("P(days)", 10)} ${pad("Orb", 3)}
+${sep}
+${data.planets.map(p =>
+  `${pad(p.name, 9)} ${padN(p.semiMajorAxis, 5)} ${padN(p.ascendingNode, 8)} ${padN(p.argPerihelion, 8)} ${padN(p.meanLongitude, 8)} ${padN(p.orbitalPeriod, 10, 1)} ${p.orbitEnabled ? " On" : "Off"}`
+).join("\n")}
+${sep}
+
+${livePositions}`;
+}
+
+function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: number; color: string; timestampRef?: React.RefObject<number | null> }) {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+
+    const container = canvasRef.current;
+    let animationId: number;
+
+    Promise.all([
+      fetch("/sdfs/common.glsl").then((res) => res.text()),
+      fetch("/sdfs/petals.glsl").then((res) => res.text()),
+      fetch("/sdfs/ephemeris.glsl").then((res) => res.text()),
+    ]).then(([commonGlsl, petalsGlsl, ephemerisGlsl]) => {
+      const combinedGlsl = commonGlsl + "\n" + petalsGlsl + "\n" + ephemerisGlsl;
+      const processed = combinedGlsl
+        .replace(/mapDistance/g, "clockSdf")
+        .replace(/mapScene/g, "clockScene")
+        .replace(/float targetDate = [^;]+;/g, "// targetDate injected as uniform")
+        .replace(/#define MAX_STEPS \d+/g, "// MAX_STEPS defined above")
+        .replace(/#define MAX_DIST[^\n]*/g, "// MAX_DIST defined above")
+        .replace(/#define SURF_DIST[^\n]*/g, "// SURF_DIST defined above")
+        // Freeze showMeT to always return 1.0 (fully grown, no animation)
+        .replace(
+          /float showMeT\(\)\s*\{[^}]*\}/,
+          `float showMeT() { return 1.0; }`,
+        )
+        // Freeze relicT too
+        .replace(
+          /float relicT\(\)\s*\{[^}]*\}/,
+          `float relicT() { return 1.0; }`,
+        )
+        // Use global targetDate for planet positions instead of hardcoded internal date
+        .replace(
+          /float internalTargetDate\s*=[^;]+;/g,
+          `float internalTargetDate = targetDate;`,
+        )
+        // Tilt star spokes slightly off PI/2 in YZ for fine-line visibility (matches second-nature-next computeStarShape)
+        .replace(
+          /p\.y \/= 2\.0;\s*\n\s*p\.xy \*= Rot\(PI \/ 2\.0\);\s*\n\s*p\.yz \*= Rot\(PI \/ 2\.0\);/,
+          `p.y /= 2.0;\n    p.xy *= Rot(PI / 2.0);\n    p.yz *= Rot(PI / 2.2);`,
+        )
+        // Compensate external XZ rotation for YZ tilt offset (PI/2 + (PI/2 - PI/2.2) = PI - PI/2.2)
+        .replace(
+          /starP\.xz \*= Rot\(PI \/ 2\.\);/,
+          `starP.xz *= Rot(PI - PI / 2.2);`,
+        );
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(200, 200);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setClearColor(0x000000, 0);
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      const vertexShader = `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position, 1.0);
+        }
+      `;
+
+      const fragmentShader = `
+        precision highp float;
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uTargetDate;
+        uniform vec3 uSilhouetteColor;
+
+        const int MAX_STEPS = 80;
+        const float MAX_DIST = 40.0;
+        const float SURF_DIST = 0.002;
+
+        float targetDate;
+
+        ${processed}
+
+        float dialSdf(vec3 p) {
+          return showMeHow(p);
+        }
+
+        float rayMarchDial(vec3 ro, vec3 rd) {
+          float t = 0.0;
+          for (int i = 0; i < MAX_STEPS; i++) {
+            vec3 p = ro + rd * t;
+            float d = dialSdf(p);
+            if (d < 0.01) return t;
+            if (t > MAX_DIST) break;
+            t += d;
+          }
+          return -1.0;
+        }
+
+        void main() {
+          targetDate = uTargetDate;
+          vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+
+          // Straight top-down view
+          vec3 ro = vec3(0.0, 8.0, 0.0);
+          vec3 rd = normalize(vec3(uv.x, -1.0, uv.y));
+
+          float t = rayMarchDial(ro, rd);
+
+          if (t > 0.0) {
+            gl_FragColor = vec4(uSilhouetteColor, 1.0);
+          } else {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+          }
+        }
+      `;
+
+      const uniforms = {
+        uResolution: { value: new THREE.Vector2(200, 200) },
+        uTime: { value: 0 },
+        uTargetDate: { value: planetTimestamp },
+        uSilhouetteColor: { value: new THREE.Vector3(0, 0, 0) },
+      };
+
+      const material = new THREE.ShaderMaterial({
+        vertexShader,
+        fragmentShader,
+        uniforms,
+        transparent: true,
+      });
+
+      materialRef.current = material;
+
+      const geometry = new THREE.PlaneGeometry(2, 2);
+      const mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      const tsRef = timestampRef;
+      const render = () => {
+        animationId = requestAnimationFrame(render);
+        // Read timestamp from ref every frame for smooth demo mode updates
+        if (tsRef?.current != null && material.uniforms.uTargetDate.value !== tsRef.current) {
+          material.uniforms.uTargetDate.value = tsRef.current;
+        }
+        renderer.render(scene, camera);
+      };
+      render();
+    });
+
+    return () => {
+      cancelAnimationFrame(animationId);
+      if (rendererRef.current && container.contains(rendererRef.current.domElement)) {
+        container.removeChild(rendererRef.current.domElement);
+        rendererRef.current.dispose();
+      }
+      materialRef.current = null;
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Update uniforms when props change
+  useEffect(() => {
+    if (!materialRef.current) return;
+    materialRef.current.uniforms.uTargetDate.value = planetTimestamp;
+    const c = parseInt(color.slice(1), 16);
+    materialRef.current.uniforms.uSilhouetteColor.value.set(
+      ((c >> 16) & 0xff) / 255,
+      ((c >> 8) & 0xff) / 255,
+      (c & 0xff) / 255,
+    );
+  }, [planetTimestamp, color]);
+
+  return (
+    <div
+      ref={canvasRef}
+      className="mb-3 mx-auto overflow-hidden"
+      style={{ width: 200, height: 200 }}
+    />
+  );
+}
+
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dateInput, setDateInput] = useState("01-01-2000");
+  const [planetDateInput, setPlanetDateInput] = useState("01-01-2000");
   const [dateFormat, setDateFormat] = useState<"mdy" | "dmy">("mdy");
+  const [livePlanetTimestamp, setLivePlanetTimestamp] = useState<number>(parseDateToUnix("01-01-2000") ?? 0);
+  const [animationMode, setAnimationMode] = useState<AnimationMode>("text");
+  const [showTorusMorph, setShowTorusMorph] = useState(false);
+  const [showDial, setShowDial] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showCapsuleGrid, setShowCapsuleGrid] = useState(false);
+  const [showGrowAnim, setShowGrowAnim] = useState(false);
+  const [bgColor, setBgColor] = useState("#d6d6d7");
+  const [demoTextColor, setDemoTextColor] = useState("#111111");
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
   const [pbrParams, setPbrParams] = useState<PBRParams>({
     numReflections: 1,
@@ -116,11 +411,18 @@ export default function Home() {
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
   const [showSliders, setShowSliders] = useState(true);
-  const [demoMode, setDemoMode] = useState(false);
+  const [demoMode, setDemoMode] = useState(true);
   const [demoDisplayDate, setDemoDisplayDate] = useState("");
   const demoTimeRef = useRef(0);
   const demoModeRef = useRef(false);
   const baseTimestampRef = useRef(0);
+  const [showEphemeris, setShowEphemeris] = useState(true);
+  const [ephemerisCompact, setEphemerisCompact] = useState(true);
+  const [ephemerisColor, setEphemerisColor] = useState("#111111");
+  const livePlanetTimestampRef = useRef<number>(parseDateToUnix("01-01-2000") ?? 0);
+  const ephemerisPreRef = useRef<HTMLPreElement>(null);
+  const demoDateRef = useRef<HTMLDivElement>(null);
+  const ephemerisCompactRef = useRef(true);
   const [lightZAnimating, setLightZAnimating] = useState(false);
   const lightZAnimationRef = useRef<{
     startTime: number;
@@ -140,18 +442,35 @@ export default function Home() {
 
   // Compute derived values
   const unixTimestamp = parseDateToUnix(dateInput);
+  const planetTimestamp = parseDateToUnix(planetDateInput);
   const displayText = dateToDisplayText(dateInput, dateFormat);
   const isValidDate = unixTimestamp !== null;
+  const isValidPlanetDate = planetTimestamp !== null;
+
+  // Sync ephemerisCompact to ref for animation loop reads
+  useEffect(() => {
+    ephemerisCompactRef.current = ephemerisCompact;
+  }, [ephemerisCompact]);
 
   // Sync demo mode to ref and reset demo time when toggled on
   useEffect(() => {
     demoModeRef.current = demoMode;
-    if (demoMode && unixTimestamp !== null) {
+    if (demoMode && planetTimestamp !== null) {
       demoTimeRef.current = 0;
-      baseTimestampRef.current = unixTimestamp;
-      setDemoDisplayDate(unixToDisplayDate(unixTimestamp));
+      baseTimestampRef.current = planetTimestamp;
+      livePlanetTimestampRef.current = planetTimestamp;
+      setDemoDisplayDate(unixToDisplayDate(planetTimestamp));
+      setLivePlanetTimestamp(planetTimestamp);
     }
-  }, [demoMode, unixTimestamp]);
+  }, [demoMode, planetTimestamp]);
+
+  // Keep livePlanetTimestamp in sync when not in demo mode
+  useEffect(() => {
+    if (!demoMode && planetTimestamp !== null) {
+      livePlanetTimestampRef.current = planetTimestamp;
+      setLivePlanetTimestamp(planetTimestamp);
+    }
+  }, [planetTimestamp, demoMode]);
 
   // Light Z animation effect
   useEffect(() => {
@@ -200,6 +519,17 @@ export default function Home() {
     const m = materialRef.current;
 
     m.uniforms.uLightingMode.value = lightingMode === "pbr" ? 0 : 1;
+    m.uniforms.uAnimMode.value = animationMode === "text" ? 0 : animationMode === "form" ? 1 : 2;
+    m.uniforms.uShowTorusMorph.value = showTorusMorph ? 1 : 0;
+    m.uniforms.uShowDial.value = showDial ? 1 : 0;
+    m.uniforms.uShowGrid.value = showGrid ? 1 : 0;
+    m.uniforms.uShowCapsuleGrid.value = showCapsuleGrid ? 1 : 0;
+    m.uniforms.uFreezeGrowth.value = showGrowAnim ? 0 : 1;
+    const bg = parseInt(bgColor.slice(1), 16);
+    m.uniforms.uBgColor.value.set(((bg >> 16) & 0xff) / 255, ((bg >> 8) & 0xff) / 255, (bg & 0xff) / 255);
+    if (planetTimestamp !== null && !demoMode) {
+      m.uniforms.uTargetDate.value = planetTimestamp;
+    }
     m.uniforms.uLight1Dir.value.set(...pbrParams.light1Dir);
     m.uniforms.uLight1Color.value.set(...pbrParams.light1Color);
     m.uniforms.uLight1Intensity.value = pbrParams.light1Intensity;
@@ -210,7 +540,7 @@ export default function Home() {
     m.uniforms.uRoughness.value = pbrParams.roughness;
     m.uniforms.uLightDir.value.set(...simpleParams.lightDir);
     m.uniforms.uDiffuseStrength.value = simpleParams.diffuseStrength;
-  }, [lightingMode, pbrParams, simpleParams]);
+  }, [lightingMode, animationMode, showTorusMorph, showDial, showGrid, showCapsuleGrid, showGrowAnim, bgColor, planetTimestamp, demoMode, pbrParams, simpleParams]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -248,7 +578,16 @@ export default function Home() {
           // Remove conflicting raymarching constants (we define our own)
           .replace(/#define MAX_STEPS \d+/g, "// MAX_STEPS defined above")
           .replace(/#define MAX_DIST[^\n]*/g, "// MAX_DIST defined above")
-          .replace(/#define SURF_DIST[^\n]*/g, "// SURF_DIST defined above");
+          .replace(/#define SURF_DIST[^\n]*/g, "// SURF_DIST defined above")
+          // Inject freeze control into showMeT
+          .replace(
+            /float showMeT\(\)\s*\{[^}]*\}/,
+            `float showMeT() {
+              if (uFreezeGrowth == 1) return 1.0;
+              float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+              return sin(tri * PI * 0.5);
+            }`,
+          );
 
         // Build glyph lookup by character
         const glyphMap = new Map<string, GlyphData>();
@@ -351,6 +690,13 @@ export default function Home() {
         uniform float uZoom;
         uniform float uTargetDate;
         uniform int uLightingMode; // 0 = PBR, 1 = Simple
+        uniform int uAnimMode; // 0 = text, 1 = form, 2 = ring
+        uniform int uShowTorusMorph;
+        uniform int uShowDial;
+        uniform int uShowGrid;
+        uniform int uShowCapsuleGrid;
+        uniform int uFreezeGrowth;
+        uniform vec3 uBgColor;
 
         // PBR params
         uniform vec3 uLight1Dir;
@@ -639,13 +985,42 @@ export default function Home() {
         }
 
         float sceneSdf(vec3 p) {
-          float dEphemeris = ephemerisSdf(p);
+          float t = relicT();
+
+          // Base ring shape: torus morph or full ring
+          float base;
+          if (uShowTorusMorph == 1) {
+            base = mix(alt(p), ephemerisScene(p), t);
+          } else {
+            base = ephemerisScene(p);
+          }
+
+          float dEphemeris = base;
+
+          // Dial (star/orbit/planet grow animation)
+          if (uShowDial == 1) {
+            dEphemeris = min(dEphemeris, showMeHow(p));
+          }
+
+          // Grid morph (intersecting cylinders)
+          if (uShowGrid == 1) {
+            dEphemeris = mix(dEphemeris, altStars(p), t);
+          }
+
+          // Capsule grid morph (intersecting capsules)
+          if (uShowCapsuleGrid == 1) {
+            dEphemeris = mix(dEphemeris, altStarsCapped(p), t);
+          }
 
           ${
             hasText
               ? `
-          float dForm = formOnInnerCylinder(p);
+          if (uAnimMode == 2) return dEphemeris;
           float dText = textOnInnerCylinder(p);
+          if (uAnimMode == 1) {
+            float dForm = formOnInnerCylinder(p);
+            return max(dEphemeris, -dForm);
+          }
           return max(dEphemeris, -dText);
           `
               : `
@@ -717,7 +1092,7 @@ export default function Home() {
           vec3 ro = rot * vec3(0.0, 0.0, camDist) + vec3(0.0, cameraHeight, 0.0);
           vec3 rd = rot * normalize(vec3(uv, -1.0));
 
-          vec3 col = vec3(0.0);
+          vec3 col = uBgColor;
 
           float t = rayMarch(ro, rd);
 
@@ -748,8 +1123,15 @@ export default function Home() {
           uMsdfTexture: { value: msdfTexture },
           uRotation: { value: new THREE.Vector3(0.3, 0.5, 0) },
           uZoom: { value: 1.0 },
-          uTargetDate: { value: unixTimestamp },
+          uTargetDate: { value: planetTimestamp },
           uLightingMode: { value: lightingMode === "pbr" ? 0 : 1 },
+          uAnimMode: { value: animationMode === "text" ? 0 : animationMode === "form" ? 1 : 2 },
+          uShowTorusMorph: { value: showTorusMorph ? 1 : 0 },
+          uShowDial: { value: showDial ? 1 : 0 },
+          uShowGrid: { value: showGrid ? 1 : 0 },
+          uShowCapsuleGrid: { value: showCapsuleGrid ? 1 : 0 },
+          uFreezeGrowth: { value: showGrowAnim ? 0 : 1 },
+          uBgColor: { value: (() => { const bg = parseInt(bgColor.slice(1), 16); return new THREE.Vector3(((bg >> 16) & 0xff) / 255, ((bg >> 8) & 0xff) / 255, (bg & 0xff) / 255); })() },
           // PBR params
           uLight1Dir: { value: new THREE.Vector3(...pbrParams.light1Dir) },
           uLight1Color: { value: new THREE.Vector3(...pbrParams.light1Color) },
@@ -860,10 +1242,18 @@ export default function Home() {
               baseTimestampRef.current + demoTimeRef.current;
             material.uniforms.uTargetDate.value = currentTimestamp;
 
-            // Update display date every ~100ms to avoid excessive state updates
+            // Write to ref for ClockView to read every frame (zero React cost)
+            livePlanetTimestampRef.current = currentTimestamp;
+
+            // Update DOM directly every ~33ms (30 FPS text updates, zero React re-renders)
             const now = performance.now();
-            if (now - lastDemoUpdate > 100) {
-              setDemoDisplayDate(unixToDisplayDate(currentTimestamp));
+            if (now - lastDemoUpdate > 33) {
+              if (demoDateRef.current) {
+                demoDateRef.current.textContent = unixToDisplayDate(currentTimestamp);
+              }
+              if (ephemerisPreRef.current) {
+                ephemerisPreRef.current.textContent = formatEphemerisText(currentTimestamp, ephemerisCompactRef.current);
+              }
               lastDemoUpdate = now;
             }
           }
@@ -906,7 +1296,7 @@ export default function Home() {
         .cleanup;
       if (cleanup) cleanup();
     };
-  }, [displayText, unixTimestamp, isValidDate]);
+  }, [displayText, isValidDate]);
 
   // Slider component
   const Slider = useCallback(
@@ -997,6 +1387,29 @@ export default function Home() {
           )}
         </div>
 
+        {/* Planet Date Input */}
+        <div className="mb-4">
+          <label className="block text-white/70 text-xs mb-1">
+            Planet Date (mm-dd-yyyy)
+          </label>
+          <input
+            type="text"
+            value={planetDateInput}
+            onChange={(e) => setPlanetDateInput(e.target.value)}
+            placeholder="03-23-1999"
+            className={`w-full bg-white/10 text-white px-3 py-2 rounded border outline-none text-sm ${
+              isValidPlanetDate
+                ? "border-white/20 focus:border-white/50"
+                : "border-red-500/50"
+            }`}
+          />
+          {isValidPlanetDate && (
+            <div className="text-white/50 text-xs mt-1">
+              Planets set to: {new Date((planetTimestamp ?? 0) * 1000).toISOString().slice(0, 10)}
+            </div>
+          )}
+        </div>
+
         {/* Demo Mode Toggle */}
         <div className="mb-4">
           <label className="flex items-center gap-2 cursor-pointer">
@@ -1026,6 +1439,159 @@ export default function Home() {
             >
               {lightZAnimating ? "Animating..." : "Light Z to 0"}
             </button>
+          )}
+        </div>
+
+        {/* Engraving Mode */}
+        <div className="mb-4">
+          <label className="block text-white/70 text-xs mb-2">
+            Engraving Mode
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setAnimationMode("text")}
+              className={`px-3 py-1 text-xs rounded ${
+                animationMode === "text"
+                  ? "bg-white/30 text-white"
+                  : "bg-white/10 text-white/50 hover:bg-white/20"
+              }`}
+            >
+              Text
+            </button>
+            <button
+              onClick={() => setAnimationMode("form")}
+              className={`px-3 py-1 text-xs rounded ${
+                animationMode === "form"
+                  ? "bg-white/30 text-white"
+                  : "bg-white/10 text-white/50 hover:bg-white/20"
+              }`}
+            >
+              Form
+            </button>
+            <button
+              onClick={() => setAnimationMode("ring")}
+              className={`px-3 py-1 text-xs rounded ${
+                animationMode === "ring"
+                  ? "bg-white/30 text-white"
+                  : "bg-white/10 text-white/50 hover:bg-white/20"
+              }`}
+            >
+              Ring Only
+            </button>
+          </div>
+        </div>
+
+        {/* Ring Animations */}
+        <div className="mb-4">
+          <label className="block text-white/70 text-xs mb-2">
+            Ring Animations
+          </label>
+          <div className="space-y-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showTorusMorph}
+                onChange={(e) => setShowTorusMorph(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/70 text-xs">Torus Morph</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showDial}
+                onChange={(e) => setShowDial(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/70 text-xs">Dial</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showGrid}
+                onChange={(e) => setShowGrid(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/70 text-xs">Grid</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showCapsuleGrid}
+                onChange={(e) => setShowCapsuleGrid(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/70 text-xs">Capsule Grid</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showGrowAnim}
+                onChange={(e) => setShowGrowAnim(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/70 text-xs">Grow/Shrink</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Colors */}
+        <div className="mb-4">
+          <label className="block text-white/70 text-xs mb-2">
+            Colors
+          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-xs text-white/70">
+              <span>BG</span>
+              <input
+                type="color"
+                value={bgColor}
+                onChange={(e) => setBgColor(e.target.value)}
+                className="w-6 h-6 rounded border border-white/20 bg-transparent cursor-pointer"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-white/70">
+              <span>Demo Text</span>
+              <input
+                type="color"
+                value={demoTextColor}
+                onChange={(e) => setDemoTextColor(e.target.value)}
+                className="w-6 h-6 rounded border border-white/20 bg-transparent cursor-pointer"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-white/70">
+              <span>Table</span>
+              <input
+                type="color"
+                value={ephemerisColor}
+                onChange={(e) => setEphemerisColor(e.target.value)}
+                className="w-6 h-6 rounded border border-white/20 bg-transparent cursor-pointer"
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* Ephemeris Data Toggle */}
+        <div className="mb-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showEphemeris}
+              onChange={(e) => setShowEphemeris(e.target.checked)}
+              className="w-4 h-4 rounded bg-white/10 border-white/20 text-white accent-white"
+            />
+            <span className="text-white/70 text-xs">Ephemeris Data</span>
+          </label>
+          {showEphemeris && (
+            <label className="flex items-center gap-2 cursor-pointer mt-1 ml-6">
+              <input
+                type="checkbox"
+                checked={ephemerisCompact}
+                onChange={(e) => setEphemerisCompact(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/50 text-xs">Compact</span>
+            </label>
           )}
         </div>
 
@@ -1208,19 +1774,42 @@ export default function Home() {
       </div>
 
       {/* Demo Mode Date Overlay */}
-      {demoMode && demoDisplayDate && (
+      {demoMode && (
         <div className="absolute top-64 left-1/2 -translate-x-1/2 pointer-events-none">
           <div
-            className="text-white text-7xl tracking-wider font-light"
+            ref={demoDateRef}
+            className="text-7xl tracking-wider font-light"
             style={{
+              color: demoTextColor,
               fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
-              textShadow:
-                "0 4px 20px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.9)",
             }}
           >
             {demoDisplayDate}
           </div>
         </div>
+      )}
+
+      {/* Clock View + Ephemeris Data Table */}
+      {showEphemeris && (
+          <div
+            className="absolute bottom-4 right-4 p-5 rounded-lg pointer-events-none"
+            style={{
+              color: ephemerisColor,
+              fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
+              fontSize: "11px",
+              lineHeight: "1.6",
+            }}
+          >
+            {/* Clock View Canvas */}
+            <ClockView
+              planetTimestamp={livePlanetTimestamp}
+              color={ephemerisColor}
+              timestampRef={livePlanetTimestampRef}
+            />
+            <pre ref={ephemerisPreRef} style={{ margin: 0, fontFamily: "inherit" }}>
+{formatEphemerisText(livePlanetTimestampRef.current, ephemerisCompact)}
+            </pre>
+          </div>
       )}
     </div>
   );
