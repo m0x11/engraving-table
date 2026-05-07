@@ -195,12 +195,11 @@ ${sep}
 ${livePositions}`;
 }
 
-const MOON_COUNT = 8;
 const MOON_CYCLE_SECONDS = 365.25 * SECONDS_PER_DAY; // one full year
 
 // Update moon phase SVG - single occluder sweeps right-to-left per moon, staggered
-// Each moon's occluder position is offset by i/MOON_COUNT of the cycle
-function updateMoonPhases(container: HTMLDivElement | null, timestamp: number) {
+// Each moon's occluder position is offset by i/moonCount of the cycle
+function updateMoonPhases(container: HTMLDivElement | null, timestamp: number, moonCount: number) {
   if (!container) return;
   // Global phase [0, 1) cycling once per year
   const globalPhase = (((timestamp % MOON_CYCLE_SECONDS) + MOON_CYCLE_SECONDS) % MOON_CYCLE_SECONDS) / MOON_CYCLE_SECONDS;
@@ -217,7 +216,7 @@ function updateMoonPhases(container: HTMLDivElement | null, timestamp: number) {
     const travel = radius * 2.5; // how far the occluder travels from center
 
     // Stagger each moon's phase
-    const phase = (globalPhase + i / MOON_COUNT) % 1.0;
+    const phase = (globalPhase + i / moonCount) % 1.0;
     // Occluder sweeps from +travel (far right, full moon) through center (new moon) to -travel (full moon)
     const occCx = center + travel * (1 - 2 * phase);
     occ.setAttribute("cx", String(occCx));
@@ -507,17 +506,29 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
 
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dateInput, setDateInput] = useState("01-01-2000");
-  const [planetDateInput, setPlanetDateInput] = useState("01-01-2000");
+  const [dateInput, setDateInput] = useState(() => {
+    const now = new Date();
+    return `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}-${now.getFullYear()}`;
+  });
+  const [planetDateInput, setPlanetDateInput] = useState(() => {
+    const now = new Date();
+    return `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}-${now.getFullYear()}`;
+  });
   const [dateFormat, setDateFormat] = useState<"mdy" | "dmy">("mdy");
-  const [livePlanetTimestamp, setLivePlanetTimestamp] = useState<number>(parseDateToUnix("01-01-2000") ?? 0);
+  const [livePlanetTimestamp, setLivePlanetTimestamp] = useState<number>(() => {
+    const now = new Date();
+    const d = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}-${now.getFullYear()}`;
+    return parseDateToUnix(d) ?? 0;
+  });
   const [animationMode, setAnimationMode] = useState<AnimationMode>("text");
   const [showTorusMorph, setShowTorusMorph] = useState(false);
   const [showDial, setShowDial] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [showCapsuleGrid, setShowCapsuleGrid] = useState(false);
   const [showGrowAnim, setShowGrowAnim] = useState(false);
-  const [bgColor, setBgColor] = useState("#d6d6d7");
+  const [showGodrays, setShowGodrays] = useState(true);
+  const [moonCount, setMoonCount] = useState(11);
+  const [bgColor, setBgColor] = useState("#ffffff");
   const [demoTextColor, setDemoTextColor] = useState("#111111");
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
   const [pbrParams, setPbrParams] = useState<PBRParams>({
@@ -540,19 +551,26 @@ export default function Home() {
   const [showSliders, setShowSliders] = useState(true);
   const [demoMode, setDemoMode] = useState(true);
   const [demoDisplayDate, setDemoDisplayDate] = useState("");
+  const [demoCountUp, setDemoCountUp] = useState(false);
+  const demoCountUpRef = useRef(false);
   const demoTimeRef = useRef(0);
   const demoModeRef = useRef(false);
   const baseTimestampRef = useRef(0);
   const [showEphemeris, setShowEphemeris] = useState(true);
   const [ephemerisCompact, setEphemerisCompact] = useState(true);
   const [ephemerisColor, setEphemerisColor] = useState("#111111");
-  const livePlanetTimestampRef = useRef<number>(parseDateToUnix("01-01-2000") ?? 0);
+  const livePlanetTimestampRef = useRef<number>((() => {
+    const now = new Date();
+    const d = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}-${now.getFullYear()}`;
+    return parseDateToUnix(d) ?? 0;
+  })());
   const ephemerisPreRef = useRef<HTMLPreElement>(null);
   const demoDateRef = useRef<HTMLDivElement>(null);
   const ephemerisCompactRef = useRef(true);
   const moonPhaseRef = useRef<HTMLDivElement>(null);
   const demoDraggingRef = useRef(false);
   const demoDragPrevXRef = useRef(0);
+  const demoDragVelocityRef = useRef(0);
   const [lightZAnimating, setLightZAnimating] = useState(false);
   const lightZAnimationRef = useRef<{
     startTime: number;
@@ -611,6 +629,7 @@ export default function Home() {
       if (!demoModeRef.current) return;
       demoDraggingRef.current = true;
       demoDragPrevXRef.current = e.clientX;
+      demoDragVelocityRef.current = 0;
       el.setPointerCapture(e.pointerId);
       e.preventDefault();
     };
@@ -620,7 +639,9 @@ export default function Home() {
       const dx = e.clientX - demoDragPrevXRef.current;
       demoDragPrevXRef.current = e.clientX;
       // ~2 days per pixel of drag
-      demoTimeRef.current += dx * 2 * 86400;
+      const delta = dx * 2 * 86400;
+      demoTimeRef.current += delta;
+      demoDragVelocityRef.current = delta;
     };
 
     const handlePointerUp = (e: PointerEvent) => {
@@ -680,6 +701,26 @@ export default function Home() {
 
   // Ref to store the material for uniform updates
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const godrayMaterialRef2 = useRef<THREE.ShaderMaterial | null>(null);
+  const renderTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  const godraySceneRef = useRef<THREE.Scene | null>(null);
+  const showGodraysRef = useRef(true);
+  const moonCountRef = useRef(11);
+
+  // Sync showGodrays to ref for animation loop
+  useEffect(() => {
+    showGodraysRef.current = showGodrays;
+  }, [showGodrays]);
+
+  // Sync moonCount to ref for animation loop
+  useEffect(() => {
+    moonCountRef.current = moonCount;
+  }, [moonCount]);
+
+  // Sync demoCountUp to ref for animation loop
+  useEffect(() => {
+    demoCountUpRef.current = demoCountUp;
+  }, [demoCountUp]);
 
   // Update uniforms without recompiling shader
   useEffect(() => {
@@ -1345,26 +1386,101 @@ export default function Home() {
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
 
-        // Mouse controls
+        // --- Godray 2-pass setup ---
+        const dpr = window.devicePixelRatio;
+        const renderTarget = new THREE.WebGLRenderTarget(
+          window.innerWidth * dpr,
+          window.innerHeight * dpr,
+          {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat,
+            type: THREE.HalfFloatType,
+          }
+        );
+        renderTargetRef.current = renderTarget;
+
+        const godrayScene = new THREE.Scene();
+        godraySceneRef.current = godrayScene;
+
+        const godrayFragmentShader = `
+          precision highp float;
+          uniform sampler2D uSceneTexture;
+          uniform vec2 uResolution;
+          uniform vec2 uLightPos;
+          uniform float uWeightFactor;
+
+          void main() {
+            vec2 uv = gl_FragCoord.xy / uResolution;
+            vec2 deltaTexCoord = (uLightPos - uv);
+
+            const int NUM_SAMPLES = 80;
+            float decay = 0.97;
+            float exposure = 0.12;
+            float density = 0.74;
+            float weight = 0.2;
+
+            deltaTexCoord *= (1.0 / float(NUM_SAMPLES)) * density;
+
+            vec4 color = texture2D(uSceneTexture, uv);
+            float illuminationDecay = 1.0;
+
+            for (int i = 0; i < NUM_SAMPLES; i++) {
+              uv += deltaTexCoord;
+              vec4 sampleTex = texture2D(uSceneTexture, uv);
+              sampleTex *= illuminationDecay * weight * uWeightFactor;
+              color += sampleTex;
+              illuminationDecay *= decay;
+            }
+
+            color *= exposure;
+            gl_FragColor = color;
+          }
+        `;
+
+        const godrayMaterial = new THREE.ShaderMaterial({
+          vertexShader,
+          fragmentShader: godrayFragmentShader,
+          uniforms: {
+            uSceneTexture: { value: renderTarget.texture },
+            uResolution: { value: new THREE.Vector2(window.innerWidth * dpr, window.innerHeight * dpr) },
+            uLightPos: { value: new THREE.Vector2(0.5, 0.5) },
+            uWeightFactor: { value: 1.0 },
+          },
+        });
+        godrayMaterialRef2.current = godrayMaterial;
+
+        const godrayGeo = new THREE.PlaneGeometry(2, 2);
+        godrayScene.add(new THREE.Mesh(godrayGeo, godrayMaterial));
+        // --- End godray setup ---
+
+        // Mouse controls with smoothing
         let isDragging = false;
         let previousMouse = { x: 0, y: 0 };
+        let rotationTarget = { x: 0.3, y: 0.5 };
         let rotation = { x: 0.3, y: 0.5 };
+        let rotationVelocity = { x: 0, y: 0 };
         let zoom = 1.0;
+        const rotationSmoothing = 0.15; // lerp factor per frame
+        const velocityDecay = 0.88; // inertia decay
 
         const handleMouseDown = (e: MouseEvent) => {
           isDragging = true;
           previousMouse = { x: e.clientX, y: e.clientY };
+          rotationVelocity = { x: 0, y: 0 };
         };
 
         const handleMouseMove = (e: MouseEvent) => {
           if (!isDragging) return;
           const dx = e.clientX - previousMouse.x;
           const dy = e.clientY - previousMouse.y;
-          rotation.y += dx * 0.005;
-          rotation.x += dy * 0.005;
-          rotation.x = Math.max(
+          rotationVelocity.y = dx * 0.005;
+          rotationVelocity.x = dy * 0.005;
+          rotationTarget.y += rotationVelocity.y;
+          rotationTarget.x += rotationVelocity.x;
+          rotationTarget.x = Math.max(
             -Math.PI / 2,
-            Math.min(Math.PI / 2, rotation.x),
+            Math.min(Math.PI / 2, rotationTarget.x),
           );
           previousMouse = { x: e.clientX, y: e.clientY };
         };
@@ -1390,6 +1506,12 @@ export default function Home() {
             window.innerWidth,
             window.innerHeight,
           );
+          // Resize render target for godrays
+          const newDpr = window.devicePixelRatio;
+          const w = window.innerWidth * newDpr;
+          const h = window.innerHeight * newDpr;
+          renderTarget.setSize(w, h);
+          godrayMaterial.uniforms.uResolution.value.set(w, h);
         };
         window.addEventListener("resize", handleResize);
 
@@ -1397,12 +1519,33 @@ export default function Home() {
         const animate = () => {
           animationId = requestAnimationFrame(animate);
           material.uniforms.uTime.value += 0.016;
+
+          // Apply inertia when not dragging
+          if (!isDragging) {
+            rotationTarget.y += rotationVelocity.y;
+            rotationTarget.x += rotationVelocity.x;
+            rotationTarget.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationTarget.x));
+            rotationVelocity.x *= velocityDecay;
+            rotationVelocity.y *= velocityDecay;
+          }
+          // Smooth lerp toward target
+          rotation.x += (rotationTarget.x - rotation.x) * rotationSmoothing;
+          rotation.y += (rotationTarget.y - rotation.y) * rotationSmoothing;
+
           material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
           material.uniforms.uZoom.value = zoom;
 
           // Demo mode: rapidly advance the date (paused while dragging)
           if (demoModeRef.current) {
-            if (!demoDraggingRef.current) {
+            // Apply date drag inertia when not dragging
+            if (!demoDraggingRef.current && Math.abs(demoDragVelocityRef.current) > 100) {
+              demoTimeRef.current += demoDragVelocityRef.current;
+              demoDragVelocityRef.current *= 0.88;
+            } else if (!demoDraggingRef.current) {
+              demoDragVelocityRef.current = 0;
+            }
+
+            if (!demoDraggingRef.current && demoCountUpRef.current && demoDragVelocityRef.current === 0) {
               // Advance by ~3 days per frame at 60fps = ~180 days/second
               const daysPerFrame = 0.25;
               const secondsPerDay = 86400;
@@ -1428,10 +1571,19 @@ export default function Home() {
             }
           }
 
-          renderer.render(scene, camera);
+          if (showGodraysRef.current && renderTargetRef.current && godraySceneRef.current) {
+            // Pass 1: ring to offscreen buffer
+            renderer.setRenderTarget(renderTargetRef.current);
+            renderer.render(scene, camera);
+            // Pass 2: godray to screen
+            renderer.setRenderTarget(null);
+            renderer.render(godraySceneRef.current, camera);
+          } else {
+            renderer.render(scene, camera);
+          }
 
           // Update moon phase indicators from current timestamp
-          updateMoonPhases(moonPhaseRef.current, livePlanetTimestampRef.current);
+          updateMoonPhases(moonPhaseRef.current, livePlanetTimestampRef.current, moonCountRef.current);
 
           // FPS calculation
           fpsRef.current.frames++;
@@ -1459,7 +1611,11 @@ export default function Home() {
           cancelAnimationFrame(animationId);
           container.removeChild(renderer.domElement);
           renderer.dispose();
+          renderTarget.dispose();
           materialRef.current = null;
+          godrayMaterialRef2.current = null;
+          renderTargetRef.current = null;
+          godraySceneRef.current = null;
         };
       },
     );
@@ -1595,23 +1751,34 @@ export default function Home() {
             <span className="text-white/70 text-xs">Demo Mode</span>
           </label>
           {demoMode && (
-            <button
-              onClick={() => {
-                lightZAnimationRef.current = {
-                  startTime: performance.now(),
-                  startValue: pbrParams.light1Dir[2],
-                };
-                setLightZAnimating(true);
-              }}
-              disabled={lightZAnimating}
-              className={`mt-2 px-3 py-1 text-xs rounded ${
-                lightZAnimating
-                  ? "bg-white/10 text-white/30 cursor-not-allowed"
-                  : "bg-white/20 text-white/70 hover:bg-white/30"
-              }`}
-            >
-              {lightZAnimating ? "Animating..." : "Light Z to 0"}
-            </button>
+            <>
+              <label className="flex items-center gap-2 cursor-pointer mt-1 ml-6">
+                <input
+                  type="checkbox"
+                  checked={demoCountUp}
+                  onChange={(e) => setDemoCountUp(e.target.checked)}
+                  className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+                />
+                <span className="text-white/50 text-xs">Count Up</span>
+              </label>
+              <button
+                onClick={() => {
+                  lightZAnimationRef.current = {
+                    startTime: performance.now(),
+                    startValue: pbrParams.light1Dir[2],
+                  };
+                  setLightZAnimating(true);
+                }}
+                disabled={lightZAnimating}
+                className={`mt-2 px-3 py-1 text-xs rounded ${
+                  lightZAnimating
+                    ? "bg-white/10 text-white/30 cursor-not-allowed"
+                    : "bg-white/20 text-white/70 hover:bg-white/30"
+                }`}
+              >
+                {lightZAnimating ? "Animating..." : "Light Z to 0"}
+              </button>
+            </>
           )}
         </div>
 
@@ -1705,6 +1872,15 @@ export default function Home() {
               />
               <span className="text-white/70 text-xs">Grow/Shrink</span>
             </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showGodrays}
+                onChange={(e) => setShowGodrays(e.target.checked)}
+                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+              />
+              <span className="text-white/70 text-xs">Godrays</span>
+            </label>
           </div>
         </div>
 
@@ -1756,15 +1932,31 @@ export default function Home() {
             <span className="text-white/70 text-xs">Ephemeris Data</span>
           </label>
           {showEphemeris && (
-            <label className="flex items-center gap-2 cursor-pointer mt-1 ml-6">
-              <input
-                type="checkbox"
-                checked={ephemerisCompact}
-                onChange={(e) => setEphemerisCompact(e.target.checked)}
-                className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
-              />
-              <span className="text-white/50 text-xs">Compact</span>
-            </label>
+            <>
+              <label className="flex items-center gap-2 cursor-pointer mt-1 ml-6">
+                <input
+                  type="checkbox"
+                  checked={ephemerisCompact}
+                  onChange={(e) => setEphemerisCompact(e.target.checked)}
+                  className="w-3 h-3 rounded bg-white/10 border-white/20 accent-white"
+                />
+                <span className="text-white/50 text-xs">Compact</span>
+              </label>
+              <div className="flex items-center gap-2 mt-1 ml-6">
+                <span className="text-white/50 text-xs">Moons</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={moonCount}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (v >= 1 && v <= 20) setMoonCount(v);
+                  }}
+                  className="w-12 bg-white/10 text-white text-center rounded border border-white/20 outline-none text-xs py-0.5"
+                />
+              </div>
+            </>
           )}
         </div>
 
@@ -1948,7 +2140,7 @@ export default function Home() {
 
       {/* Demo Mode Date Overlay */}
       {demoMode && (
-        <div className="absolute top-64 left-1/2 -translate-x-1/2">
+        <div className="absolute top-80 left-1/2 -translate-x-1/2">
           <div
             ref={demoDateRef}
             className="text-7xl tracking-wider font-light select-none"
@@ -1969,6 +2161,7 @@ export default function Home() {
             className="absolute bottom-6 right-6 p-8 rounded-lg pointer-events-none"
             style={{
               color: ephemerisColor,
+              backgroundColor: bgColor,
               fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
               fontSize: "16px",
               lineHeight: "1.6",
@@ -1984,8 +2177,8 @@ export default function Home() {
 {formatEphemerisText(livePlanetTimestampRef.current, ephemerisCompact)}
             </pre>
             {/* Moon phase indicator */}
-            <div ref={moonPhaseRef} className="flex flex-row gap-3 justify-center" style={{ paddingTop: "64px", paddingBottom: "64px" }}>
-              {Array.from({ length: MOON_COUNT }).map((_, i) => {
+            <div ref={moonPhaseRef} className="flex flex-row gap-5 justify-center" style={{ paddingTop: "64px", paddingBottom: "64px" }}>
+              {Array.from({ length: moonCount }).map((_, i) => {
                 const viewBoxSize = 28;
                 const radius = 14;
                 const center = viewBoxSize / 2;
