@@ -275,7 +275,7 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
           `p.y /= 2.0;\n    p.xy *= Rot(PI / 2.0);\n    p.yz *= Rot(PI / 2.2);`,
         );
 
-      const SIZE = 300;
+      const SIZE = 360;
       const dpr = window.devicePixelRatio;
       const bufferW = SIZE * dpr;
       const bufferH = SIZE * dpr;
@@ -499,7 +499,7 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
     <div
       ref={canvasRef}
       className="mb-3 mx-auto overflow-hidden"
-      style={{ width: 300, height: 300 }}
+      style={{ width: 360, height: 360 }}
     />
   );
 }
@@ -527,7 +527,7 @@ export default function Home() {
   const [showCapsuleGrid, setShowCapsuleGrid] = useState(false);
   const [showGrowAnim, setShowGrowAnim] = useState(false);
   const [showGodrays, setShowGodrays] = useState(true);
-  const [moonCount, setMoonCount] = useState(11);
+  const [moonCount, setMoonCount] = useState(8);
   const [bgColor, setBgColor] = useState("#ffffff");
   const [demoTextColor, setDemoTextColor] = useState("#111111");
   const [lightingMode, setLightingMode] = useState<LightingMode>("pbr");
@@ -705,7 +705,7 @@ export default function Home() {
   const renderTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
   const godraySceneRef = useRef<THREE.Scene | null>(null);
   const showGodraysRef = useRef(true);
-  const moonCountRef = useRef(11);
+  const moonCountRef = useRef(8);
 
   // Sync showGodrays to ref for animation loop
   useEffect(() => {
@@ -2158,7 +2158,7 @@ export default function Home() {
       {/* Clock View + Ephemeris Data Table */}
       {showEphemeris && (
           <div
-            className="absolute bottom-6 right-6 p-8 rounded-lg pointer-events-none"
+            className="absolute top-0 bottom-0 right-0 p-8 pointer-events-none flex flex-col justify-center"
             style={{
               color: ephemerisColor,
               backgroundColor: bgColor,
