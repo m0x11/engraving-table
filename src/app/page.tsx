@@ -195,9 +195,39 @@ ${sep}
 ${livePositions}`;
 }
 
+const MOON_COUNT = 8;
+const MOON_CYCLE_SECONDS = 365.25 * SECONDS_PER_DAY; // one full year
+
+// Update moon phase SVG - single occluder sweeps right-to-left per moon, staggered
+// Each moon's occluder position is offset by i/MOON_COUNT of the cycle
+function updateMoonPhases(container: HTMLDivElement | null, timestamp: number) {
+  if (!container) return;
+  // Global phase [0, 1) cycling once per year
+  const globalPhase = (((timestamp % MOON_CYCLE_SECONDS) + MOON_CYCLE_SECONDS) % MOON_CYCLE_SECONDS) / MOON_CYCLE_SECONDS;
+
+  const svgs = container.querySelectorAll("svg");
+  for (let i = 0; i < svgs.length; i++) {
+    const svg = svgs[i];
+    const occ = svg.querySelector<SVGCircleElement>("[data-occ='sweep']");
+    if (!occ) continue;
+
+    const viewBoxSize = 28;
+    const radius = 14;
+    const center = viewBoxSize / 2;
+    const travel = radius * 2.5; // how far the occluder travels from center
+
+    // Stagger each moon's phase
+    const phase = (globalPhase + i / MOON_COUNT) % 1.0;
+    // Occluder sweeps from +travel (far right, full moon) through center (new moon) to -travel (full moon)
+    const occCx = center + travel * (1 - 2 * phase);
+    occ.setAttribute("cx", String(occCx));
+  }
+}
+
 function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: number; color: string; timestampRef?: React.RefObject<number | null> }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const godrayMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const mountedRef = useRef(false);
 
@@ -237,44 +267,52 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
           /float internalTargetDate\s*=[^;]+;/g,
           `float internalTargetDate = targetDate;`,
         )
-        // Tilt star spokes slightly off PI/2 in YZ for fine-line visibility (matches second-nature-next computeStarShape)
+        // Tilt star spokes in YZ to PI/2.2 for fine-line visibility
+        // (matches starShape in reference: p.yz *= Rot(PI / 2.2))
+        // The external starP.xz *= Rot(PI / 2.) stays unchanged —
+        // the godray post-process rotates the 2D output by -PI/2.2 to straighten visually
         .replace(
           /p\.y \/= 2\.0;\s*\n\s*p\.xy \*= Rot\(PI \/ 2\.0\);\s*\n\s*p\.yz \*= Rot\(PI \/ 2\.0\);/,
           `p.y /= 2.0;\n    p.xy *= Rot(PI / 2.0);\n    p.yz *= Rot(PI / 2.2);`,
-        )
-        // Compensate external XZ rotation for YZ tilt offset (PI/2 + (PI/2 - PI/2.2) = PI - PI/2.2)
-        .replace(
-          /starP\.xz \*= Rot\(PI \/ 2\.\);/,
-          `starP.xz *= Rot(PI - PI / 2.2);`,
         );
 
-      const scene = new THREE.Scene();
-      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const SIZE = 300;
+      const dpr = window.devicePixelRatio;
+      const bufferW = SIZE * dpr;
+      const bufferH = SIZE * dpr;
+
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setSize(200, 200);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(SIZE, SIZE);
+      renderer.setPixelRatio(dpr);
       renderer.setClearColor(0x000000, 0);
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
+      // --- Pass 1: Render dial SDF to buffer ---
+      const bufferTarget = new THREE.WebGLRenderTarget(bufferW, bufferH, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+      });
+
+      const scene1 = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
       const vertexShader = `
-        varying vec2 vUv;
         void main() {
-          vUv = uv;
           gl_Position = vec4(position, 1.0);
         }
       `;
 
-      const fragmentShader = `
+      const pass1Fragment = `
         precision highp float;
         uniform vec2 uResolution;
         uniform float uTime;
         uniform float uTargetDate;
-        uniform vec3 uSilhouetteColor;
 
-        const int MAX_STEPS = 80;
+        const int MAX_STEPS = 100;
         const float MAX_DIST = 40.0;
-        const float SURF_DIST = 0.002;
+        const float SURF_DIST = 0.001;
 
         float targetDate;
 
@@ -289,7 +327,7 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
           for (int i = 0; i < MAX_STEPS; i++) {
             vec3 p = ro + rd * t;
             float d = dialSdf(p);
-            if (d < 0.01) return t;
+            if (d < 0.005) return t;
             if (t > MAX_DIST) break;
             t += d;
           }
@@ -300,48 +338,132 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
           targetDate = uTargetDate;
           vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
 
-          // Straight top-down view
           vec3 ro = vec3(0.0, 8.0, 0.0);
           vec3 rd = normalize(vec3(uv.x, -1.0, uv.y));
 
           float t = rayMarchDial(ro, rd);
 
           if (t > 0.0) {
-            gl_FragColor = vec4(uSilhouetteColor, 1.0);
+            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
           } else {
             gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
           }
         }
       `;
 
-      const uniforms = {
-        uResolution: { value: new THREE.Vector2(200, 200) },
+      const pass1Uniforms = {
+        uResolution: { value: new THREE.Vector2(bufferW, bufferH) },
         uTime: { value: 0 },
         uTargetDate: { value: planetTimestamp },
-        uSilhouetteColor: { value: new THREE.Vector3(0, 0, 0) },
       };
 
-      const material = new THREE.ShaderMaterial({
+      const pass1Material = new THREE.ShaderMaterial({
         vertexShader,
-        fragmentShader,
-        uniforms,
+        fragmentShader: pass1Fragment,
+        uniforms: pass1Uniforms,
         transparent: true,
       });
 
-      materialRef.current = material;
+      materialRef.current = pass1Material;
 
-      const geometry = new THREE.PlaneGeometry(2, 2);
-      const mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+      const geo = new THREE.PlaneGeometry(2, 2);
+      scene1.add(new THREE.Mesh(geo, pass1Material));
+
+      // --- Pass 2: Rotated UV sample + brightness accumulation (no actual rays) ---
+      // The 3D tilt (PI/2.2) makes fine lines intersect camera rays at an angle
+      // (better for raymarcher detection). This pass rotates UVs by -PI/2.2 to
+      // straighten the visual output while preserving the 3D detection benefit.
+      const scene2 = new THREE.Scene();
+
+      const pass2Fragment = `
+        precision highp float;
+        uniform sampler2D uBuffer;
+        uniform vec2 uResolution;
+        uniform vec3 uSilhouetteColor;
+
+        mat2 rot2(float a) {
+          float s = sin(a), c = cos(a);
+          return mat2(c, -s, s, c);
+        }
+
+        void main() {
+          vec2 uv = gl_FragCoord.xy / uResolution;
+          vec2 centre = vec2(0.5);
+
+          // Counter-rotate to straighten spokes tilted by p.yz *= Rot(PI/2.2) in 3D
+          float aspect = uResolution.x / uResolution.y;
+          vec2 p = uv - centre;
+          p.x *= aspect;
+          const float angle = 3.14159265 / 2.2;
+          p = rot2(angle) * p;
+          p.x /= aspect;
+          uv = centre + p;
+
+          // Accumulation loop (density=0 means no radial movement, just brightness)
+          const int NUM_SAMPLES = 55;
+          float decay = 0.967;
+          float exposure = 0.22;
+          float density = 0.0;
+          float weight = 0.58767;
+
+          vec4 color = texture2D(uBuffer, uv) * 0.805104;
+
+          vec2 lightPos = vec2(0.5, 0.5);
+          vec2 deltaTexCoord = (lightPos - uv);
+          deltaTexCoord *= (1.0 / float(NUM_SAMPLES)) * density;
+
+          float illuminationDecay = 1.0;
+          for (int i = 0; i < NUM_SAMPLES; i++) {
+            uv += deltaTexCoord;
+            vec4 sampleTex = texture2D(uBuffer, uv) * 0.305104;
+            sampleTex *= illuminationDecay * weight;
+            color += sampleTex;
+            illuminationDecay *= decay;
+          }
+
+          color *= exposure;
+
+          // Colorize with silhouette color
+          float intensity = max(color.r, max(color.g, color.b));
+          if (intensity < 0.01) discard;
+          gl_FragColor = vec4(uSilhouetteColor * intensity, intensity);
+        }
+      `;
+
+      const pass2Uniforms = {
+        uBuffer: { value: bufferTarget.texture },
+        uResolution: { value: new THREE.Vector2(bufferW, bufferH) },
+        uSilhouetteColor: { value: new THREE.Vector3(0, 0, 0) },
+      };
+
+      const pass2Material = new THREE.ShaderMaterial({
+        vertexShader,
+        fragmentShader: pass2Fragment,
+        uniforms: pass2Uniforms,
+        transparent: true,
+      });
+
+      godrayMaterialRef.current = pass2Material;
+
+      scene2.add(new THREE.Mesh(geo.clone(), pass2Material));
 
       const tsRef = timestampRef;
       const render = () => {
         animationId = requestAnimationFrame(render);
-        // Read timestamp from ref every frame for smooth demo mode updates
-        if (tsRef?.current != null && material.uniforms.uTargetDate.value !== tsRef.current) {
-          material.uniforms.uTargetDate.value = tsRef.current;
+        // Read timestamp from ref every frame
+        if (tsRef?.current != null && pass1Material.uniforms.uTargetDate.value !== tsRef.current) {
+          pass1Material.uniforms.uTargetDate.value = tsRef.current;
         }
-        renderer.render(scene, camera);
+        // Pass 1: render dial to buffer
+        renderer.setRenderTarget(bufferTarget);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear();
+        renderer.render(scene1, camera);
+        // Pass 2: godray + colorize to screen
+        renderer.setRenderTarget(null);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear();
+        renderer.render(scene2, camera);
       };
       render();
     });
@@ -353,27 +475,31 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
         rendererRef.current.dispose();
       }
       materialRef.current = null;
+      godrayMaterialRef.current = null;
       mountedRef.current = false;
     };
   }, []);
 
   // Update uniforms when props change
   useEffect(() => {
-    if (!materialRef.current) return;
-    materialRef.current.uniforms.uTargetDate.value = planetTimestamp;
-    const c = parseInt(color.slice(1), 16);
-    materialRef.current.uniforms.uSilhouetteColor.value.set(
-      ((c >> 16) & 0xff) / 255,
-      ((c >> 8) & 0xff) / 255,
-      (c & 0xff) / 255,
-    );
+    if (materialRef.current) {
+      materialRef.current.uniforms.uTargetDate.value = planetTimestamp;
+    }
+    if (godrayMaterialRef.current) {
+      const c = parseInt(color.slice(1), 16);
+      godrayMaterialRef.current.uniforms.uSilhouetteColor.value.set(
+        ((c >> 16) & 0xff) / 255,
+        ((c >> 8) & 0xff) / 255,
+        (c & 0xff) / 255,
+      );
+    }
   }, [planetTimestamp, color]);
 
   return (
     <div
       ref={canvasRef}
       className="mb-3 mx-auto overflow-hidden"
-      style={{ width: 200, height: 200 }}
+      style={{ width: 300, height: 300 }}
     />
   );
 }
@@ -423,6 +549,9 @@ export default function Home() {
   const ephemerisPreRef = useRef<HTMLPreElement>(null);
   const demoDateRef = useRef<HTMLDivElement>(null);
   const ephemerisCompactRef = useRef(true);
+  const moonPhaseRef = useRef<HTMLDivElement>(null);
+  const demoDraggingRef = useRef(false);
+  const demoDragPrevXRef = useRef(0);
   const [lightZAnimating, setLightZAnimating] = useState(false);
   const lightZAnimationRef = useRef<{
     startTime: number;
@@ -471,6 +600,44 @@ export default function Home() {
       setLivePlanetTimestamp(planetTimestamp);
     }
   }, [planetTimestamp, demoMode]);
+
+  // Demo date drag-to-scrub: horizontal drag on the date text changes the date
+  useEffect(() => {
+    const el = demoDateRef.current;
+    if (!el) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (!demoModeRef.current) return;
+      demoDraggingRef.current = true;
+      demoDragPrevXRef.current = e.clientX;
+      el.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!demoDraggingRef.current) return;
+      const dx = e.clientX - demoDragPrevXRef.current;
+      demoDragPrevXRef.current = e.clientX;
+      // ~2 days per pixel of drag
+      demoTimeRef.current += dx * 2 * 86400;
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      if (!demoDraggingRef.current) return;
+      demoDraggingRef.current = false;
+      el.releasePointerCapture(e.pointerId);
+    };
+
+    el.addEventListener("pointerdown", handlePointerDown);
+    el.addEventListener("pointermove", handlePointerMove);
+    el.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      el.removeEventListener("pointerdown", handlePointerDown);
+      el.removeEventListener("pointermove", handlePointerMove);
+      el.removeEventListener("pointerup", handlePointerUp);
+    };
+  });
 
   // Light Z animation effect
   useEffect(() => {
@@ -1232,12 +1399,14 @@ export default function Home() {
           material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
           material.uniforms.uZoom.value = zoom;
 
-          // Demo mode: rapidly advance the date
+          // Demo mode: rapidly advance the date (paused while dragging)
           if (demoModeRef.current) {
-            // Advance by ~3 days per frame at 60fps = ~180 days/second
-            const daysPerFrame = 0.25;
-            const secondsPerDay = 86400;
-            demoTimeRef.current += daysPerFrame * secondsPerDay;
+            if (!demoDraggingRef.current) {
+              // Advance by ~3 days per frame at 60fps = ~180 days/second
+              const daysPerFrame = 0.25;
+              const secondsPerDay = 86400;
+              demoTimeRef.current += daysPerFrame * secondsPerDay;
+            }
             const currentTimestamp =
               baseTimestampRef.current + demoTimeRef.current;
             material.uniforms.uTargetDate.value = currentTimestamp;
@@ -1259,6 +1428,9 @@ export default function Home() {
           }
 
           renderer.render(scene, camera);
+
+          // Update moon phase indicators from current timestamp
+          updateMoonPhases(moonPhaseRef.current, livePlanetTimestampRef.current);
 
           // FPS calculation
           fpsRef.current.frames++;
@@ -1775,13 +1947,14 @@ export default function Home() {
 
       {/* Demo Mode Date Overlay */}
       {demoMode && (
-        <div className="absolute top-64 left-1/2 -translate-x-1/2 pointer-events-none">
+        <div className="absolute top-64 left-1/2 -translate-x-1/2">
           <div
             ref={demoDateRef}
-            className="text-7xl tracking-wider font-light"
+            className="text-7xl tracking-wider font-light select-none"
             style={{
               color: demoTextColor,
               fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
+              cursor: "ew-resize",
             }}
           >
             {demoDisplayDate}
@@ -1792,11 +1965,11 @@ export default function Home() {
       {/* Clock View + Ephemeris Data Table */}
       {showEphemeris && (
           <div
-            className="absolute bottom-4 right-4 p-5 rounded-lg pointer-events-none"
+            className="absolute bottom-6 right-6 p-8 rounded-lg pointer-events-none"
             style={{
               color: ephemerisColor,
               fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
-              fontSize: "11px",
+              fontSize: "16px",
               lineHeight: "1.6",
             }}
           >
@@ -1806,9 +1979,42 @@ export default function Home() {
               color={ephemerisColor}
               timestampRef={livePlanetTimestampRef}
             />
-            <pre ref={ephemerisPreRef} style={{ margin: 0, fontFamily: "inherit" }}>
+            <pre ref={ephemerisPreRef} style={{ margin: 0, fontFamily: "inherit", paddingTop: "24px", paddingBottom: "24px" }}>
 {formatEphemerisText(livePlanetTimestampRef.current, ephemerisCompact)}
             </pre>
+            {/* Moon phase indicator */}
+            <div ref={moonPhaseRef} className="flex flex-row gap-3 justify-center" style={{ paddingTop: "64px", paddingBottom: "64px" }}>
+              {Array.from({ length: MOON_COUNT }).map((_, i) => {
+                const viewBoxSize = 28;
+                const radius = 14;
+                const center = viewBoxSize / 2;
+                const maskId = `moonRotMask-${i}`;
+                return (
+                  <svg
+                    key={i}
+                    width={viewBoxSize}
+                    height={viewBoxSize}
+                    viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`}
+                  >
+                    <defs>
+                      <mask id={maskId} maskUnits="userSpaceOnUse">
+                        <rect x="0" y="0" width={viewBoxSize} height={viewBoxSize} fill="black" />
+                        <circle cx={center} cy={center} r={radius} fill="white" />
+                        <circle data-occ="sweep" cx={center + radius * 2.5} cy={center} r={radius} fill="black" />
+                      </mask>
+                    </defs>
+                    <rect
+                      x="0" y="0"
+                      width={viewBoxSize}
+                      height={viewBoxSize}
+                      fill={ephemerisColor}
+                      mask={`url(#${maskId})`}
+                      rx={radius}
+                    />
+                  </svg>
+                );
+              })}
+            </div>
           </div>
       )}
     </div>
