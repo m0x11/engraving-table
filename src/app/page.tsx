@@ -388,6 +388,7 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
 
         void main() {
           vec2 uv = gl_FragCoord.xy / uResolution;
+          uv.x = 1.0 - uv.x;
           vec2 centre = vec2(0.5);
 
           // Counter-rotate to straighten spokes tilted by p.yz *= Rot(PI/2.2) in 3D
