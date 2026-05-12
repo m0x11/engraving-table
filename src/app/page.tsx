@@ -273,6 +273,12 @@ function ClockView({ planetTimestamp, color, timestampRef }: { planetTimestamp: 
         .replace(
           /p\.y \/= 2\.0;\s*\n\s*p\.xy \*= Rot\(PI \/ 2\.0\);\s*\n\s*p\.yz \*= Rot\(PI \/ 2\.0\);/,
           `p.y /= 2.0;\n    p.xy *= Rot(PI / 2.0);\n    p.yz *= Rot(PI / 2.2);`,
+        )
+        // Compensate planet XZ positions for the PI/2.2 spoke tilt + 2D counter-rotation
+        // The residual rotation on planets is PI/2.0 - PI/2.2 = PI/22 (~8.2°)
+        .replace(
+          /transformedP\.xz \*= Rot\(-PI \/ 2\.\);/g,
+          `transformedP.xz *= Rot(-PI / 2. - (PI / 2.0 - PI / 2.2));`,
         );
 
       const SIZE = 360;
@@ -796,6 +802,11 @@ export default function Home() {
               float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
               return sin(tri * PI * 0.5);
             }`,
+          )
+          // Animate planet positions from targetDate+3years down to targetDate
+          .replace(
+            /float internalTargetDate\s*=[^;]+;/g,
+            `float internalTargetDate = mix(targetDate + 94672800.0, targetDate, t);`,
           );
 
         // Build glyph lookup by character
@@ -1674,7 +1685,7 @@ export default function Home() {
         {/* Date Input */}
         <div className="mb-4">
           <label className="block text-white/70 text-xs mb-1">
-            Date (mm-dd-yyyy)
+            Engraving Date (mm-dd-yyyy)
           </label>
           <input
             type="text"
