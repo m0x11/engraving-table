@@ -54,7 +54,12 @@ export default function MonthCalendar({
   const headerRef = useRef<HTMLDivElement>(null);
   const cellRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const prevMonthRef = useRef({ year: initYear, month: initMonth });
-  const lastHighlightedRef = useRef<number>(-1);
+  const colorRef = useRef(color);
+  const bgColorRef = useRef(bgColor);
+
+  // Keep color refs current for rAF reads
+  useEffect(() => { colorRef.current = color; }, [color]);
+  useEffect(() => { bgColorRef.current = bgColor; }, [bgColor]);
 
   // Sync when timestamp prop changes (not from count-up)
   useEffect(() => {
@@ -70,6 +75,23 @@ export default function MonthCalendar({
   useEffect(() => {
     if (!countUpActive || !liveTimestampRef) return;
     let rafId: number;
+    let lastDay = -1;
+
+    const applyHighlight = (day: number) => {
+      const c = colorRef.current;
+      const bg = bgColorRef.current;
+      for (let i = 0; i < cellRefs.current.length; i++) {
+        const btn = cellRefs.current[i];
+        if (!btn) continue;
+        if (i + 1 === day) {
+          btn.style.backgroundColor = c;
+          btn.style.color = bg;
+        } else {
+          btn.style.backgroundColor = "transparent";
+          btn.style.color = c;
+        }
+      }
+    };
 
     const tick = () => {
       rafId = requestAnimationFrame(tick);
@@ -86,36 +108,18 @@ export default function MonthCalendar({
       // If month changed, trigger React re-render to rebuild the grid
       if (year !== prevMonthRef.current.year || month !== prevMonthRef.current.month) {
         prevMonthRef.current = { year, month };
-        lastHighlightedRef.current = -1;
+        lastDay = -1;
         setViewYear(year);
         setViewMonth(month);
         setSelectedDay(day);
-      } else {
-        // Clear previous highlight
-        const prevDay = lastHighlightedRef.current;
-        if (prevDay >= 0 && prevDay < cellRefs.current.length) {
-          const prevBtn = cellRefs.current[prevDay];
-          if (prevBtn) {
-            prevBtn.style.backgroundColor = "transparent";
-            prevBtn.style.color = color;
-          }
-        }
-
-        // Set new highlight
-        const idx = day - 1;
-        if (idx >= 0 && idx < cellRefs.current.length) {
-          const btn = cellRefs.current[idx];
-          if (btn) {
-            btn.style.backgroundColor = color;
-            btn.style.color = bgColor;
-          }
-        }
-        lastHighlightedRef.current = idx;
+      } else if (day !== lastDay) {
+        lastDay = day;
+        applyHighlight(day);
       }
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [countUpActive, liveTimestampRef, color, bgColor]);
+  }, [countUpActive, liveTimestampRef]);
 
   const prevMonth = useCallback(() => {
     setViewMonth((m) => {
@@ -125,6 +129,7 @@ export default function MonthCalendar({
       }
       return m - 1;
     });
+    setSelectedDay(-1);
   }, []);
 
   const nextMonth = useCallback(() => {
@@ -135,6 +140,7 @@ export default function MonthCalendar({
       }
       return m + 1;
     });
+    setSelectedDay(-1);
   }, []);
 
   const handleDayClick = useCallback((day: number) => {
@@ -150,15 +156,16 @@ export default function MonthCalendar({
   const cells: (number | null)[] = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= dim; d++) cells.push(d);
-  // Pad to complete row
   while (cells.length % 7 !== 0) cells.push(null);
 
-  // Reset cellRefs array
+  // Reset cellRefs array for this render
   cellRefs.current = new Array(dim).fill(null);
-  lastHighlightedRef.current = -1;
 
   const cellSize = `${fontSize * 2}px`;
   const arrowSize = `${fontSize * 0.85}px`;
+
+  // When count-up is active, don't apply React highlights — rAF owns the DOM styles
+  const isActive = (day: number | null) => !countUpActive && day === selectedDay;
 
   return (
     <div style={{ color, fontFamily, userSelect: "none", fontSize: `${fontSize}px` }}>
@@ -182,18 +189,18 @@ export default function MonthCalendar({
         ))}
       </div>
 
-      {/* Day grid */}
+      {/* Day grid — key includes month/year so React fully remounts on month change */}
       <div className="grid grid-cols-7 gap-0 text-center">
         {cells.map((day, i) => (
           <button
-            key={i}
+            key={`${viewYear}-${viewMonth}-${i}`}
             ref={day ? (el) => { cellRefs.current[day - 1] = el; } : undefined}
             disabled={day === null}
             onClick={() => day && handleDayClick(day)}
             className="flex items-center justify-center hover:opacity-70 transition-colors"
             style={{
-              backgroundColor: day === selectedDay ? color : "transparent",
-              color: day === selectedDay ? bgColor : day ? color : "transparent",
+              backgroundColor: isActive(day) ? color : "transparent",
+              color: isActive(day) ? bgColor : day ? color : "transparent",
               cursor: day ? "pointer" : "default",
               width: cellSize,
               height: cellSize,
