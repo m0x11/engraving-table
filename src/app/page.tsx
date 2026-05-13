@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
+import KaTeXSymbol from "../components/KaTeXSymbol";
+import MonthCalendar from "../components/MonthCalendar";
+import DateDials from "../components/DateDials";
 
 const ATLAS_SIZE = 344;
 
@@ -577,6 +580,146 @@ export default function Home() {
   const demoDraggingRef = useRef(false);
   const demoDragPrevXRef = useRef(0);
   const demoDragVelocityRef = useRef(0);
+  const [demoViewMode, setDemoViewMode] = useState<"text" | "calendar" | "dials">("text");
+  const [demoFontSize, setDemoFontSize] = useState(14);
+
+  // Camera state bridge for save/load
+  type CameraState = {
+    rotationTarget: { x: number; y: number };
+    rotation: { x: number; y: number };
+    zoom: number;
+    panOffset: { x: number; y: number };
+  };
+  const cameraStateRef = useRef<CameraState | null>(null);
+  const cameraRestoreRef = useRef<CameraState | null>(null);
+  // Scene save/load
+  type SceneState = {
+    version: 1;
+    dateInput: string;
+    planetDateInput: string;
+    dateFormat: "mdy" | "dmy";
+    animationMode: AnimationMode;
+    showTorusMorph: boolean;
+    showDial: boolean;
+    showGrid: boolean;
+    showCapsuleGrid: boolean;
+    showGrowAnim: boolean;
+    showGodrays: boolean;
+    moonCount: number;
+    bgColor: string;
+    demoTextColor: string;
+    lightingMode: LightingMode;
+    pbrParams: PBRParams;
+    simpleParams: SimpleParams;
+    demoMode: boolean;
+    demoCountUp: boolean;
+    showEphemeris: boolean;
+    ephemerisCompact: boolean;
+    ephemerisColor: string;
+    demoViewMode: "text" | "calendar" | "dials";
+    demoFontSize: number;
+    camera: {
+      rotationTarget: { x: number; y: number };
+      rotation: { x: number; y: number };
+      zoom: number;
+      panOffset: { x: number; y: number };
+    } | null;
+  };
+
+  const handleSaveScene = useCallback(() => {
+    const cam = cameraStateRef.current;
+    const state: SceneState = {
+      version: 1,
+      dateInput,
+      planetDateInput,
+      dateFormat,
+      animationMode,
+      showTorusMorph,
+      showDial,
+      showGrid,
+      showCapsuleGrid,
+      showGrowAnim,
+      showGodrays,
+      moonCount,
+      bgColor,
+      demoTextColor,
+      lightingMode,
+      pbrParams,
+      simpleParams,
+      demoMode,
+      demoCountUp,
+      showEphemeris,
+      ephemerisCompact,
+      ephemerisColor,
+      demoViewMode,
+      demoFontSize,
+      camera: cam ? {
+        rotationTarget: cam.rotationTarget,
+        rotation: cam.rotation,
+        zoom: cam.zoom,
+        panOffset: cam.panOffset,
+      } : null,
+    };
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const dateStr = planetDateInput.replace(/\//g, "-");
+    a.href = url;
+    a.download = `scene-${dateStr}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [dateInput, planetDateInput, dateFormat, animationMode, showTorusMorph, showDial, showGrid, showCapsuleGrid, showGrowAnim, showGodrays, moonCount, bgColor, demoTextColor, lightingMode, pbrParams, simpleParams, demoMode, demoCountUp, showEphemeris, ephemerisCompact, ephemerisColor, demoViewMode, demoFontSize]);
+
+  const handleLoadScene = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const state = JSON.parse(reader.result as string) as SceneState;
+          if (state.version !== 1) return;
+          setDateInput(state.dateInput);
+          setPlanetDateInput(state.planetDateInput);
+          setDateFormat(state.dateFormat);
+          setAnimationMode(state.animationMode);
+          setShowTorusMorph(state.showTorusMorph);
+          setShowDial(state.showDial);
+          setShowGrid(state.showGrid);
+          setShowCapsuleGrid(state.showCapsuleGrid);
+          setShowGrowAnim(state.showGrowAnim);
+          setShowGodrays(state.showGodrays);
+          setMoonCount(state.moonCount);
+          setBgColor(state.bgColor);
+          setDemoTextColor(state.demoTextColor);
+          setLightingMode(state.lightingMode);
+          setPbrParams(state.pbrParams);
+          setSimpleParams(state.simpleParams);
+          setDemoMode(state.demoMode);
+          setDemoCountUp(state.demoCountUp);
+          setShowEphemeris(state.showEphemeris);
+          setEphemerisCompact(state.ephemerisCompact);
+          setEphemerisColor(state.ephemerisColor);
+          if (state.demoViewMode) setDemoViewMode(state.demoViewMode);
+          if (state.demoFontSize) setDemoFontSize(state.demoFontSize);
+          if (state.camera) {
+            cameraRestoreRef.current = {
+              rotationTarget: state.camera.rotationTarget,
+              rotation: state.camera.rotation,
+              zoom: state.camera.zoom,
+              panOffset: state.camera.panOffset,
+            };
+          }
+        } catch { /* ignore bad JSON */ }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }, []);
+
   const [lightZAnimating, setLightZAnimating] = useState(false);
   const lightZAnimationRef = useRef<{
     startTime: number;
@@ -908,6 +1051,7 @@ export default function Home() {
         uniform sampler2D uMsdfTexture;
         uniform vec3 uRotation;
         uniform float uZoom;
+        uniform vec2 uPanOffset;
         uniform float uTargetDate;
         uniform int uLightingMode; // 0 = PBR, 1 = Simple
         uniform int uAnimMode; // 0 = text, 1 = form, 2 = ring
@@ -1309,7 +1453,8 @@ export default function Home() {
           float camDist = 6.0 / uZoom;
 
           mat3 rot = rotateY(uRotation.y) * rotateX(uRotation.x);
-          vec3 ro = rot * vec3(0.0, 0.0, camDist) + vec3(0.0, cameraHeight, 0.0);
+          vec3 panWorld = rot * vec3(uPanOffset.x, uPanOffset.y, 0.0);
+          vec3 ro = rot * vec3(0.0, 0.0, camDist) + vec3(0.0, cameraHeight, 0.0) + panWorld;
           vec3 rd = rot * normalize(vec3(uv, -1.0));
 
           vec3 col = uBgColor;
@@ -1343,6 +1488,7 @@ export default function Home() {
           uMsdfTexture: { value: msdfTexture },
           uRotation: { value: new THREE.Vector3(0.3, 0.5, 0) },
           uZoom: { value: 1.0 },
+          uPanOffset: { value: new THREE.Vector2(0, 0) },
           uTargetDate: { value: planetTimestamp },
           uLightingMode: { value: lightingMode === "pbr" ? 0 : 1 },
           uAnimMode: { value: animationMode === "text" ? 0 : animationMode === "form" ? 1 : 2 },
@@ -1467,21 +1613,50 @@ export default function Home() {
 
         // Mouse controls with smoothing
         let isDragging = false;
+        let isPanning = false;
         let previousMouse = { x: 0, y: 0 };
+        let previousPanMouse = { x: 0, y: 0 };
         let rotationTarget = { x: 0.3, y: 0.5 };
         let rotation = { x: 0.3, y: 0.5 };
         let rotationVelocity = { x: 0, y: 0 };
         let zoom = 1.0;
+        let panOffset = { x: 0, y: 0 };
         const rotationSmoothing = 0.15; // lerp factor per frame
         const velocityDecay = 0.88; // inertia decay
 
+        // Restore camera from ref if load has been requested
+        if (cameraRestoreRef.current) {
+          const s = cameraRestoreRef.current;
+          rotationTarget = { ...s.rotationTarget };
+          rotation = { ...s.rotation };
+          zoom = s.zoom;
+          panOffset = { ...s.panOffset };
+          cameraRestoreRef.current = null;
+        }
+
         const handleMouseDown = (e: MouseEvent) => {
+          if (e.button === 1) {
+            // Middle-click → pan
+            isPanning = true;
+            previousPanMouse = { x: e.clientX, y: e.clientY };
+            e.preventDefault();
+            return;
+          }
           isDragging = true;
           previousMouse = { x: e.clientX, y: e.clientY };
           rotationVelocity = { x: 0, y: 0 };
         };
 
         const handleMouseMove = (e: MouseEvent) => {
+          if (isPanning) {
+            const dx = e.clientX - previousPanMouse.x;
+            const dy = e.clientY - previousPanMouse.y;
+            const speed = 0.003 / zoom;
+            panOffset.x += dx * speed;
+            panOffset.y -= dy * speed;
+            previousPanMouse = { x: e.clientX, y: e.clientY };
+            return;
+          }
           if (!isDragging) return;
           const dx = e.clientX - previousMouse.x;
           const dy = e.clientY - previousMouse.y;
@@ -1496,8 +1671,17 @@ export default function Home() {
           previousMouse = { x: e.clientX, y: e.clientY };
         };
 
-        const handleMouseUp = () => {
+        const handleMouseUp = (e: MouseEvent) => {
+          if (e.button === 1) {
+            isPanning = false;
+            return;
+          }
           isDragging = false;
+        };
+
+        // Prevent middle-click context menu / paste
+        const handleAuxClick = (e: MouseEvent) => {
+          if (e.button === 1) e.preventDefault();
         };
 
         const handleWheel = (e: WheelEvent) => {
@@ -1510,6 +1694,7 @@ export default function Home() {
         window.addEventListener("mousemove", handleMouseMove);
         window.addEventListener("mouseup", handleMouseUp);
         container.addEventListener("wheel", handleWheel, { passive: false });
+        container.addEventListener("auxclick", handleAuxClick);
 
         const handleResize = () => {
           renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1545,6 +1730,15 @@ export default function Home() {
 
           material.uniforms.uRotation.value.set(rotation.x, rotation.y, 0);
           material.uniforms.uZoom.value = zoom;
+          material.uniforms.uPanOffset.value.set(panOffset.x, panOffset.y);
+
+          // Write camera state for save/load
+          cameraStateRef.current = {
+            rotationTarget: { ...rotationTarget },
+            rotation: { ...rotation },
+            zoom,
+            panOffset: { ...panOffset },
+          };
 
           // Demo mode: rapidly advance the date (paused while dragging)
           if (demoModeRef.current) {
@@ -1618,6 +1812,7 @@ export default function Home() {
           window.removeEventListener("mousemove", handleMouseMove);
           window.removeEventListener("mouseup", handleMouseUp);
           container.removeEventListener("wheel", handleWheel);
+          container.removeEventListener("auxclick", handleAuxClick);
           window.removeEventListener("resize", handleResize);
           cancelAnimationFrame(animationId);
           container.removeChild(renderer.domElement);
@@ -1679,8 +1874,24 @@ export default function Home() {
         className="w-full h-full cursor-grab active:cursor-grabbing"
       />
       <div className="absolute top-4 left-4 bg-black/70 p-4 rounded-lg max-w-xs">
-        {/* FPS Counter */}
-        <div className="text-white/50 text-xs mb-3">{fps} FPS</div>
+        {/* Save/Load + FPS */}
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            onClick={handleSaveScene}
+            className="px-2 py-1 text-xs rounded bg-white/10 text-white/70 hover:bg-white/20 flex items-center gap-1"
+            title="Save scene"
+          >
+            <KaTeXSymbol tex="\boxdot" style={{ fontSize: "0.7rem" }} /> Save
+          </button>
+          <button
+            onClick={handleLoadScene}
+            className="px-2 py-1 text-xs rounded bg-white/10 text-white/70 hover:bg-white/20 flex items-center gap-1"
+            title="Load scene"
+          >
+            <KaTeXSymbol tex="\boxplus" style={{ fontSize: "0.7rem" }} /> Load
+          </button>
+          <span className="text-white/50 text-xs ml-auto">{fps} FPS</span>
+        </div>
 
         {/* Date Input */}
         <div className="mb-4">
@@ -1772,6 +1983,36 @@ export default function Home() {
                 />
                 <span className="text-white/50 text-xs">Count Up</span>
               </label>
+              <div className="flex gap-1 mt-2 ml-6">
+                {(["text", "calendar", "dials"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setDemoViewMode(mode)}
+                    className={`px-2 py-0.5 text-xs rounded ${
+                      demoViewMode === mode
+                        ? "bg-white/30 text-white"
+                        : "bg-white/10 text-white/50 hover:bg-white/20"
+                    }`}
+                  >
+                    {mode === "text" ? "Text" : mode === "calendar" ? "Cal" : "Dials"}
+                  </button>
+                ))}
+              </div>
+              {demoViewMode !== "text" && (
+                <div className="flex items-center gap-2 mt-2 ml-6 text-xs">
+                  <span className="text-white/50">Size</span>
+                  <input
+                    type="range"
+                    min={8}
+                    max={32}
+                    step={1}
+                    value={demoFontSize}
+                    onChange={(e) => setDemoFontSize(parseInt(e.target.value, 10))}
+                    className="w-16 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer"
+                  />
+                  <span className="text-white/40 w-6">{demoFontSize}</span>
+                </div>
+              )}
               <button
                 onClick={() => {
                   lightZAnimationRef.current = {
@@ -2152,17 +2393,50 @@ export default function Home() {
       {/* Demo Mode Date Overlay */}
       {demoMode && (
         <div className="absolute top-80 left-1/2 -translate-x-1/2">
-          <div
-            ref={demoDateRef}
-            className="text-7xl tracking-wider font-light select-none"
-            style={{
-              color: demoTextColor,
-              fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
-              cursor: "ew-resize",
-            }}
-          >
-            {demoDisplayDate}
-          </div>
+          {demoViewMode === "text" && (
+            <div
+              ref={demoDateRef}
+              className="text-7xl tracking-wider font-light select-none"
+              style={{
+                color: demoTextColor,
+                fontFamily: "'PP Right Serif Mono', 'Courier New', monospace",
+                cursor: "ew-resize",
+              }}
+            >
+              {demoDisplayDate}
+            </div>
+          )}
+          {demoViewMode === "calendar" && (
+            <MonthCalendar
+              timestamp={livePlanetTimestampRef.current ?? livePlanetTimestamp}
+              onDateSelect={(ts) => {
+                const d = new Date(ts * 1000);
+                const str = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}-${d.getUTCFullYear()}`;
+                setPlanetDateInput(str);
+              }}
+              color={demoTextColor}
+              bgColor={bgColor}
+              fontFamily="'PP Right Serif Mono', 'Courier New', monospace"
+              fontSize={demoFontSize}
+              liveTimestampRef={livePlanetTimestampRef}
+              countUpActive={demoCountUp}
+            />
+          )}
+          {demoViewMode === "dials" && (
+            <DateDials
+              timestamp={livePlanetTimestampRef.current ?? livePlanetTimestamp}
+              onDateSelect={(ts) => {
+                const d = new Date(ts * 1000);
+                const str = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}-${d.getUTCFullYear()}`;
+                setPlanetDateInput(str);
+              }}
+              color={demoTextColor}
+              fontFamily="'PP Right Serif Mono', 'Courier New', monospace"
+              fontSize={demoFontSize}
+              liveTimestampRef={livePlanetTimestampRef}
+              countUpActive={demoCountUp}
+            />
+          )}
         </div>
       )}
 
