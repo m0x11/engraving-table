@@ -189,7 +189,7 @@ export default function DateDials({
   }, [month, day, emitDate]);
 
   const maxDay = daysInMonth(year, month);
-  const arrowSize = `${fontSize * 0.75}rem`;
+  const arrowSize = `${fontSize * 0.75}px`;
   const activeSize = `${fontSize}px`;
   const inactiveSize = `${fontSize * 0.75}px`;
 

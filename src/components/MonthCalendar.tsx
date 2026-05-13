@@ -158,7 +158,7 @@ export default function MonthCalendar({
   lastHighlightedRef.current = -1;
 
   const cellSize = `${fontSize * 2}px`;
-  const arrowSize = `${fontSize * 0.85}rem`;
+  const arrowSize = `${fontSize * 0.85}px`;
 
   return (
     <div style={{ color, fontFamily, userSelect: "none", fontSize: `${fontSize}px` }}>
