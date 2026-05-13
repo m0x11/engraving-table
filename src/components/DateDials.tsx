@@ -17,7 +17,7 @@ const MONTH_ABBRS = [
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
   "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ];
-const VISIBLE_COUNT = 5;
+const VISIBLE_COUNT = 3;
 const MID = Math.floor(VISIBLE_COUNT / 2);
 
 function tsToDateParts(ts: number) {
