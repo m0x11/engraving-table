@@ -15,7 +15,7 @@
  * The resulting SDF accepts uniforms:
  * - uTargetDate                Unix timestamp for planetary positions
  * - uGlyphIndices[11]          glyph per engraving slot
- * - uBoreR, uBandDepth, uCapScale, uDialScale, uDetail, uCenterY
+ * - uBoreR, uBandDepth, uCapScale, uDialScale, uDetail, uTextScale, uCenterY
  *                              the size dials (sdf-mesher/ring-sizing.js)
  *
  * Run once: node setup-ephemeris-sized.js
@@ -164,8 +164,9 @@ mat2 Rot2D(float a) {
 }
 
 // Date on the bore — the engraving table's layout, parametric: the band
-// centre and bore radius come from the size dials, glyphs hold uDetail em
-// per world unit (the canonical physical size at every size).
+// centre and bore radius come from the size dials. Glyphs ride uTextScale
+// (the old pipeline's uniform factor), so the date is engraved as big as
+// the table always cut it, at every size.
 float textOnInnerCylinder(vec3 p) {
   vec3 q = p;
   q.y -= EPH_BAND_CENTER_Y;
@@ -176,13 +177,13 @@ float textOnInnerCylinder(vec3 p) {
   float r = length(q.xz);
   float h = q.y;
 
-  float textScale = uDetail;
+  float textScale = uTextScale;
   float textX = -angle * cylinderRadius / textScale;
   float textY = h / textScale + 0.34;
 
   float d2d = textSdf2D(vec2(textX, textY)) * textScale;
 
-  float textDepth = 0.1665 * uDetail;
+  float textDepth = 0.1665 * uTextScale;
   float surfaceDist = cylinderRadius - r;
 
   vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
