@@ -306,13 +306,19 @@ float getMoonOrbitRadius() {
     return earthEffectiveRadius - moonRadius;
 }
 
-vec3 getMoonPositionFlat(float unixTime, vec3 earthPosFlat) {
+vec3 transformToBowlPattern(vec3 p) {
+    float r = length(p.xz);
+    return vec3(p.x, p.y - getBowlHeight(r), p.z);
+}
+
+vec3 getMoonPositionFlat(float unixTime, vec3 earthPosOriginal) {
     float daysFromJ2000 = (unixTime - J2000_UNIX) / SECONDS_PER_DAY;
     float moonAngle = (2.0 * PI * daysFromJ2000) / 27.321661 + PI;
     float orbitRadius = getMoonOrbitRadius();
+    vec3 earthPos = transformToBowlPattern(earthPosOriginal);
     float moonX = -cos(moonAngle) * orbitRadius;
     float moonZ = sin(moonAngle) * orbitRadius;
-    return earthPosFlat + vec3(moonX, 0.0, moonZ);
+    return earthPos + vec3(moonX, 0.0, moonZ);
 }
 
 float ellipsoidDist(vec3 p, vec3 center, float R, float scaleY) {
