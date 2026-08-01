@@ -223,7 +223,7 @@ function generateCombinedSDF(ephemerisCode, textGlsl) {
   }
   const depthLineEnd = modifiedEphemeris.indexOf('\n', depthIndex);
   modifiedEphemeris = modifiedEphemeris.slice(0, depthLineEnd + 1) +
-    '\n// targetDate set from uniform for mesh generation\nfloat targetDate = uTargetDate;\n' +
+    '\n// targetDate assigned from uniform in mapDistance (GLSL 300 es requires\n// global initializers to be constant expressions)\nfloat targetDate;\n' +
     '// Stub for viewer-only function (must be before stampHand which calls it)\nfloat petalsSdf(vec3 p, float s) { return 1e10; }\n' +
     modifiedEphemeris.slice(depthLineEnd + 1);
 
@@ -266,6 +266,7 @@ function generateCombinedSDF(ephemerisCode, textGlsl) {
 
 // ========== MESH GENERATION mapDistance ==========
 float mapDistance(vec3 p) {
+  targetDate = uTargetDate;
   // Apply Y offset to keep ring in view
   p.y -= 4.0;
 

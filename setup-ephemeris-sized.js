@@ -164,9 +164,11 @@ mat2 Rot2D(float a) {
 }
 
 // Date on the bore — the engraving table's layout, parametric: the band
-// centre and bore radius come from the size dials. Glyphs ride uTextScale
-// (the old pipeline's uniform factor), so the date is engraved as big as
-// the table always cut it, at every size.
+// centre and bore radius come from the size dials. Glyph em is the
+// PRODUCTION 1.5 (sdfs/ephemeris-variable/sdf.txt, commit "fix ephemeris
+// ring engraving size") riding uTextScale (the old pipeline's uniform
+// factor), so the date is engraved as big as the table always cut it,
+// at every size.
 float textOnInnerCylinder(vec3 p) {
   vec3 q = p;
   q.y -= EPH_BAND_CENTER_Y;
@@ -177,13 +179,13 @@ float textOnInnerCylinder(vec3 p) {
   float r = length(q.xz);
   float h = q.y;
 
-  float textScale = uTextScale;
+  float textScale = 1.5 * uTextScale;
   float textX = -angle * cylinderRadius / textScale;
   float textY = h / textScale + 0.34;
 
   float d2d = textSdf2D(vec2(textX, textY)) * textScale;
 
-  float textDepth = 0.1665 * uTextScale;
+  float textDepth = 0.172 * uTextScale;
   float surfaceDist = cylinderRadius - r;
 
   vec2 w = vec2(d2d, abs(surfaceDist) - textDepth);
