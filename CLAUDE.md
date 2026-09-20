@@ -37,6 +37,15 @@ Each generated SDF folder contains:
 - `msdf.png` - Multi-channel signed distance field font texture
 
 ## Mesh Generation Workflow
+
+### Preferred: batch-engrave (one step)
+```bash
+cd ../sdf-mesher && python3 -m http.server 8000
+cd ../sdf-mesher && node batch-engrave.js --resolution 1100 07-04-1776
+```
+Uses `ephemeris-variable` SDF with uniform swapping — no per-date SDF generation needed.
+
+### Legacy: generate SDF then mesh (two steps)
 1. Generate SDF: `node generate-engraved-ephemeris.js <date>`
 2. Start mesher server: `cd ../sdf-mesher && python3 -m http.server 8000`
 3. Run automation: `cd ../sdf-mesher && node auto-mesh.js <sdf-name>`

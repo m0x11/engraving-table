@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@types/katex": "^0.16.8",
     "@types/three": "^0.182.0",
+    "katex": "^0.16.45",
     "next": "16.1.1",
     "pngjs": "^7.0.0",
     "react": "19.2.3",

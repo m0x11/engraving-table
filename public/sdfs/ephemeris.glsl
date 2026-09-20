@@ -1,35 +1,29 @@
+//////////////////////////////////////////////////////////
+// Ephemeris SDF - Planetary ring with orbital visualization
+// Requires: common.glsl to be loaded first
+//////////////////////////////////////////////////////////
+
 #define MAX_STEPS 100
 #define MAX_DIST  100.0
 #define SURF_DIST 0.001
-#define PI 3.141592653589793
 #define DEG_TO_RAD (PI / 180.0)
 #define DEPTH 2.2
 
-float smax(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0);
-    return mix(b, a, h) + k * h * (1.0 - h);
+//////////////////////////////////////////////////////////
+// Global Animation Timers
+//////////////////////////////////////////////////////////
+// showMeT: used for showMe animations and demo distance fields
+float showMeT() {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    return sin(tri * PI * 0.5);
+    //return 1.0;
 }
 
-
-
-float sdCappedCylinder(vec3 p, float r, float hh) {
-    vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r, hh);
-    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
-}
-
-float sdCapsule(vec3 p, float r, float h) {
-    float y = max(0.0, min(h, p.y));
-    return length(vec3(p.x, p.y - y, p.z)) - r;
-}
-
-float sdTorusX(vec3 p, vec2 t) {
-    vec2 q = vec2(length(p.yz) - t.x, p.x);
-    return length(q) - t.y;
-}
-
-float sdBox(vec3 p, vec3 s) {
-    p = abs(p)-s;
-	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
+// relicT: used for final interpolation between alt and mapScene
+float relicT() {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    return sin(tri * PI * 0.5);
+    //return 1.0;
 }
 
 // Visual scale factors
@@ -155,29 +149,27 @@ float getOrbitalPeriod(int planetID) {
 #define PLANET_SCALE 0.5
 
 float getPlanetRadius(int index) {
+    float t = showMeT();
     // -1 => Sun
     if (index == -1) {
         return 0.0; // star radius
     }
-    // 0..7 => Mercury..Neptune
-    if (index == 0) return 0.32; // Mercury
-    else if (index == 1) return 0.32; // Venus
-    else if (index == 2) return 0.32; // Earth
-    else if (index == 3) return 0.32; // Mars
-    else if (index == 4) return 0.32; // Jupiter
-    else if (index == 5) return 0.32; // Saturn
-    else if (index == 6) return 0.32; // Uranus
-    else if (index == 7) return 0.32; // Neptune
-    return 0.0;
+    return mix(-0.5, .32, t);
 }
 
 //////////////////////////////////////////////////////////
 // Trail thickness (similar to second version but no arrays)
 //////////////////////////////////////////////////////////
+
+
+// DEMO SPECIFIC
 float getTrailThickness(int planetID) {
-    // Example from second version: Mercury=0.01, all else=0.04, etc.
-    //if (planetID == EARTH)   return 0.;
     return 0.04;
+}
+
+float getTrailThicknessDemo(int planetID) {
+    float t = showMeT();
+    return mix(-0.011, 0.004, t);
 }
 
 //////////////////////////////////////////////////////////
@@ -247,7 +239,13 @@ vec3 getPlanetPosition(float unixTime, int planetID) {
 
 float getBowlHeight(float r) {
     if (r >= sphereRadius) return 0.0;
-    return sphereCenterY - sqrt(sphereRadius*sphereRadius - r*r);
+    //float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    //float t = sin(tri * PI * 0.5);
+    //float sphereRadiusDemo = mix(40., 15., t);
+    //float sphereCenterYDemo = mix(40.,15., t);
+    float sphereRadiusDemo = sphereRadius;
+    float sphereCenterYDemo = sphereCenterY;
+    return sphereCenterYDemo - sqrt(sphereRadiusDemo*sphereRadiusDemo - r*r);
 }
 
 vec3 transformToBowl(vec3 p) {
@@ -261,11 +259,7 @@ float getBowlSphereDistance(vec3 p) {
     return length(p - sphereCenter) - sphereRadius;
 }
 
-mat2 Rot(float a) {
-    float s = sin(a);
-    float c = cos(a);
-    return mat2(c, -s, s, c);
-}
+// Rot is now in common.glsl
 
 //////////////////////////////////////////////////////////
 // MOON ORBIT
@@ -325,7 +319,7 @@ float getPlanetsDistance(vec3 p, float unixTime) {
     
     // Check distance to each planet
     for(int i = 0; i < 8; i++) {
-        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 0.6);
+        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 1.0);
         minDist = min(minDist, planetDist);
         
         // Add Moon if this is Earth
@@ -350,7 +344,7 @@ float getOuterPlanetsDistance(vec3 p, float unixTime) {
     
     // Check distance to each planet
     for(int i = 4; i < 8; i++) {
-        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 0.6);
+        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 1.0);
         minDist = min(minDist, planetDist);
     }
     
@@ -359,14 +353,22 @@ float getOuterPlanetsDistance(vec3 p, float unixTime) {
 
 
 float getMoonDistance(vec3 p, float unixTime) {
- 
     p.y += 0.07; // Consistent with Earth
-     p.y *= DEPTH;
+    p.y *= DEPTH;
     vec3 earthPosOriginal = getPlanetPosition(unixTime, EARTH);
     vec3 moonPos = getMoonPosition(unixTime, earthPosOriginal);
     //float moonDist = length(p - moonPos) - moonRadius;
     float moonDist = sdCappedCylinder((p - moonPos), .11, .198);
     //float moonDist = length(p - moonPos) - .15;
+    return moonDist;
+}
+
+float getMoonDistanceDemo(vec3 p, float unixTime) {
+    float t = showMeT();
+    vec3 earthPosOriginal = getPlanetPosition(unixTime, EARTH);
+    vec3 moonPos = getMoonPosition(unixTime, earthPosOriginal);
+
+    float moonDist = sdCappedCylinder((p - moonPos), mix(-0.15, .122, t), .598);
     return moonDist;
 }
 
@@ -378,7 +380,7 @@ float getSmallPlanetsDistance(vec3 p, float unixTime) {
     // Check distance to each planet
     for(int i = 0; i < 5; i++) {
         if (i == EARTH) continue;
-        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 0.6);
+        float planetDist = getPlanetDistance(p, i, unixTime, 1.0, 1.0);
         minDist = min(minDist, planetDist);
     }
     
@@ -415,6 +417,14 @@ float getPlanetOrbitPathDistance(vec3 p, int planetID) {
     return sdCircularOrbit(p, orbitRadius, thickness);
 }
 
+float getPlanetOrbitPathDistanceDemo(vec3 p, int planetID) {
+    //p.y += 0.025;
+    p.y /= 1.32;
+    float orbitRadius = getSemiMajorAxis(planetID) * systemScale;
+    float thickness   = getTrailThicknessDemo(planetID) * trailScale; 
+    return sdCircularOrbit(p, orbitRadius, thickness);
+}
+
 float getMoonOrbitPathDistance(vec3 p, float t) {
     vec3 earthPos = getPlanetPosition(t, EARTH);
     vec3 plocal = p - earthPos;
@@ -434,11 +444,8 @@ float getStarOrbitPathDistance(vec3 p) {
 
 //////////////////////////////////////////////////////////
 // Additional geometry (Ring, Signet, Star, Bowl)
+// smin/smax are now in common.glsl
 //////////////////////////////////////////////////////////
-float smin(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-    return mix(b, a, h) - k * h * (1.0 - h);
-}
 
 float sminRate(float a, float b, float k, float rate) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -657,8 +664,25 @@ vec3 curveSpace(vec3 p) {
 }
 
 
+float stampHand(vec3 p) {
+    // move into position
+    p.y += 8.39;
+
+    p.yz *= Rot(PI/2.);
+    //p.x -= 1.;
+    p = curveSpace(p);
+ 
+    //scale
+    //p *= 1.4;
+    
+    return petalsSdf(p, 1.0);
+}
+
 float stamp(vec3 p) {
-    float thickness = .11;
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    float hand = stampHand(p);
+    float thickness = .22;
     // move into position
     p.y += 8.45;
     p.yz *= Rot(PI/2.);
@@ -667,21 +691,29 @@ float stamp(vec3 p) {
     //scale
     p *= 1.4;
     
-    float ftusMain = fractus(p.yx, vec2(-1., 0.0));
+    //float s = mix(-2.0, -1.0, t);
+    float s = -1.0;
+    float ftusMain = fractus(p.yx, vec2(s, 0.0));
     p.z = abs(p.z);
     //float slice = smax(ftusMain, p.z - thickness, 0.02);
     float slice = max(ftusMain, p.z - thickness);
  
+    //return mix(hand, slice, t);
     return slice;
+    //return min(slice, hand);
 }
+
+
 
 //////////////////////////////////////////////////////////
 // Final Scene Distance
 //////////////////////////////////////////////////////////
 
+// default 
+
+/*
 float mapScene(vec3 p) {
-   
-    float targetDate = 942347471.;
+    // targetDate is set externally (via uniform in viewer, or hardcoded for mesh generation)
 
     // 1) Transform to bowl space
     vec3 transformedP = transformToBowl(p);
@@ -769,9 +801,401 @@ float mapScene(vec3 p) {
     
     return finalDist;
 }
+*/
+
+// demo
 
 
+float showMeStar(vec3 p, float targetDate)
+{
+    float t = showMeT();
+    
+    p.y /= 2.0;
+    p.xy *= Rot(PI / 2.0);
+    p.yz *= Rot(PI / 2.0);
+
+    // Spoke angle in the *local yz-plane*
+    float pointAngle = atan(p.z, p.y);
+    
+    //float numSpokes = mix(111., 8., t);
+    float numSpokes = 8.;
+    float spokeSpacing = 2.0 * PI / numSpokes;
+    float closestSpokeAngle = floor((pointAngle / spokeSpacing) + 0.5) * spokeSpacing;
+    
+    //-----------------------------------------------------------
+    //     Transform Earth and Neptune to the same local yz-plane!
+    //-----------------------------------------------------------
+    // Earth positions
+    vec3 earthPosWorld = getPlanetPosition(targetDate, EARTH);
+    earthPosWorld.xy *= Rot(PI / 2.0);
+    earthPosWorld.yz *= Rot(PI);
+    float earthAngleLocal = atan(earthPosWorld.z, earthPosWorld.y);
+    
+    // Neptune positions
+    vec3 neptunePosWorld = getPlanetPosition(targetDate, NEPTUNE);
+    neptunePosWorld.xy *= Rot(PI / 2.0);
+    neptunePosWorld.yz *= Rot(PI);
+    float neptuneAngleLocal = atan(neptunePosWorld.z, neptunePosWorld.y);
+    
+    // Compare angles in the correct space
+    float earthAngularDist = PI - abs(PI - abs(
+        mod(closestSpokeAngle - earthAngleLocal, 2.0*PI)
+    ));
+    
+    float neptuneAngularDist = PI - abs(PI - abs(
+        mod(closestSpokeAngle - neptuneAngleLocal, 2.0*PI)
+    ));
+    
+    // Configuration for masking spheres
+    float maskingSphereRadius = 0.4;    // Radius of the masking spheres
+    float earthMaskOffset = 1.0;        // Distance for Earth mask
+    float neptuneMaskOffset = 3.0;      // Distance for Neptune mask
+    
+    vec3 spokePt = p;
+    spokePt.yz *= Rot(-closestSpokeAngle);
+    
+    // Determine if we're on a 0 or 90 degree spoke (x or y axis aligned)
+    // We need to check if closestSpokeAngle is approximately 0, PI/2, PI, or 3PI/2
+    float angleModPI2 = mod(closestSpokeAngle, PI/2.0);
+    bool isAxisAligned = angleModPI2 < 0.01 || angleModPI2 > (PI/2.0 - 0.01);
+    
+    // Create the basic ray with variable thickness
+
+    float rayLength = mix(0., 3.16, t);
+    //float rayThickness = isAxisAligned ? 0.0033 : 0.0048;
+    float rayThickness = mix(0., 0.004, t);
+    float rays = sdCapsule(spokePt, rayThickness, rayLength);
+    return rays;
+}
+
+
+float showMeHow(vec3 p) {
+    float t = showMeT();
+
+    //p.y -= 0.22;
+    //p.yz *= Rot(-PI / 4.);
+    //p.yz *= Rot(PI / 3.);
+    //float t = 0.;
+    //float targetDate = 193323096000.; // Midnight 2/29/8096
+    //float targetDate = 800021340.; // 5:09 5/9/1995
+    //float targetDate = 942347471.; // 11:11 11/11/1999
+    //float targetDate = 1735761600.; // Midnight 1/1/2025
+    //float targetDate = 2175761600.;
+    //float targetDate = 1762888271.; // 11 11 2025
+    //float targetDate = 200992043471.; // 03 09 8339
+    
+    
+    //targetDate += iTime * 3200000.;
+
+    //float targetDate = mix(902188183., 922188183., t);
+    //float targetDate = mix(972347471., 942347471., t); 
+    //float internalTargetDate = mix(200992043471., 	200928971471., t); 
+    //float internalTargetDate = mix(1869109071., 1769109071., t);
+    float internalTargetDate = 	mix(992347471., 	942347471., t);
+
+    // 1) Transform to bowl space
+    vec3 transformedP = transformToBowl(p);
+    //vec3 transformedP = p;
+    vec3 starP = transformedP;
+    starP.xz *= Rot(PI / 2.);
+    float dStar = showMeStar(starP, targetDate);
+    
+    transformedP.xz *= Rot(-PI / 2.);
+    
+    
+    // 2) Distance to all planets (incl. Moon & Sun)
+    //float dPlanets = getPlanetsDistance(transformedP, targetDate);
+    float dOuterPlanets = getOuterPlanetsDistance(transformedP, internalTargetDate);
+    float dMoonSphere = getMoonDistanceDemo(transformedP, internalTargetDate);
+    float dEarthSphere = getEarthDistance(transformedP, internalTargetDate);
+    float dSmallPlanets = getSmallPlanetsDistance(transformedP, internalTargetDate);
+    
+    // Some orbit arcs (Mercury, Earth, Neptune, plus the rest)
+    float dMerc = getPlanetOrbitPathDistanceDemo(transformedP, MERCURY);
+    float dVenus = getPlanetOrbitPathDistanceDemo(transformedP, VENUS);
+    float dEarth = getPlanetOrbitPathDistanceDemo(transformedP, EARTH);
+    float dNept = getPlanetOrbitPathDistanceDemo(transformedP, NEPTUNE);
+    float dStarOrbit         = getStarOrbitPathDistance(transformedP);
+    
+    // Remaining orbits: (Mars=3, Jupiter=4, Saturn=5, Uranus=6)
+    float dOthers = 1e10;
+    for(int i = 3; i <= 6; i++) {
+        float d = getPlanetOrbitPathDistanceDemo(transformedP, i);
+        if (d < dOthers) {
+            dOthers = d;
+        }
+    }
+    
+    // The signet ring geometry, plus bowl
+    float dSignet = signet(p);
+    float dBasinSphere = getBowlSphereDistance(p);
+    
+    // Star shape in bowl space
+    transformedP.xz *= Rot(PI / 2.);
+
+
+    float garnish = 1e10;
+
+    garnish = smin(dStar,   dStarOrbit,  mix(0., 0.16, t));
+    
+    float garn = mix(0.4, 0.0, t);
+    
+    garnish       = smin(garnish, dMerc, garn);
+    garnish       = smin(garnish, dVenus, garn);
+    garnish       = smin(garnish, dEarth,  garn);
+    garnish       = smin(garnish, dNept,   0.2);
+    garnish       = smin(garnish, dOthers, garn);
+
+
+    float outers = directionalSminY(dOuterPlanets, garnish, .016, p);
+    float small = directionalSminY(dSmallPlanets, garnish, .01, p);
+    float earth = directionalSminY(dEarthSphere, garnish, .01, p);
+    float moon = dMoonSphere;
+    
+    float planetsPlusGarnish = min(earth, min(outers, small));
+    float finalDist = planetsPlusGarnish;    
+    finalDist = max(-moon, finalDist);
+
+    return finalDist;
+}
+
+float mapScene(vec3 p) {
+    // targetDate is set externally (via uniform in viewer, or hardcoded for mesh generation)
+
+    
+    // 1) Transform to bowl space
+    vec3 transformedP = transformToBowl(p);
+    transformedP.xz *= Rot(-PI / 2.);
+    
+     transformedP.y /= DEPTH;
+    
+    // 2) Distance to all planets (incl. Moon & Sun)
+    //float dPlanets = getPlanetsDistance(transformedP, targetDate);
+    float dOuterPlanets = getOuterPlanetsDistance(transformedP, targetDate);
+    float dMoonSphere = getMoonDistance(transformedP, targetDate);
+    float dEarthSphere = getEarthDistance(transformedP, targetDate);
+    float dSmallPlanets = getSmallPlanetsDistance(transformedP, targetDate);
+    
+    // Some orbit arcs (Mercury, Earth, Neptune, plus the rest)
+    float dMerc = getPlanetOrbitPathDistance(transformedP, MERCURY);
+    float dVenus = getPlanetOrbitPathDistance(transformedP, VENUS);
+    float dEarth = getPlanetOrbitPathDistance(transformedP, EARTH);
+    float dNept = getPlanetOrbitPathDistance(transformedP, NEPTUNE);
+    float dStarOrbit         = getStarOrbitPathDistance(transformedP);
+    
+    // Remaining orbits: (Mars=3, Jupiter=4, Saturn=5, Uranus=6)
+    float dOthers = 1e10;
+    for(int i = 3; i <= 6; i++) {
+        float d = getPlanetOrbitPathDistance(transformedP, i);
+        if (d < dOthers) {
+            dOthers = d;
+        }
+    }
+    
+    // The signet ring geometry, plus bowl
+    float dSignet = signet(p);
+    float dBasinSphere = getBowlSphereDistance(p);
+    float dRing = max(-dBasinSphere, dSignet);
+    
+    // Star shape in bowl space
+    transformedP.xz *= Rot(PI / 2.);
+    float dStar = starShape(transformedP, targetDate);
+    
+
+    float garnish = 1e10;
+    garnish = smin(dStar,   dStarOrbit,  0.18);
+    
+    garnish       = smin(garnish, dMerc, 0.0);
+    garnish       = smin(garnish, dVenus, 0.0);
+    garnish       = smin(garnish, dEarth,  0.0);
+    garnish       = smin(garnish, dNept,   0.2);
+    garnish       = smin(garnish, dOthers, 0.0);
+
+    float outers = directionalSminY(dOuterPlanets, garnish, .016, p);
+    float small = directionalSminY(dSmallPlanets, garnish, .01, p);
+    float earth = directionalSminY(dEarthSphere, garnish, .01, p);
+    float moon = dMoonSphere;
+    
+    float planetsPlusGarnish = min(earth, min(outers, small));
+    float finalDist = smax(-planetsPlusGarnish, dRing, 0.0);
+    
+    finalDist = smin(moon, finalDist, 0.0);
+    finalDist = smax(-dStar,finalDist,0.0);
+    float stamp = stamp(p);
+    finalDist = max(finalDist, -stamp);
+
+    return finalDist;
+}
+
+
+float alt(in vec3 p) {
+  p.xy *= Rot(PI/2.);
+  return sdTorusX(vec3(p.x, p.y, p.z), vec2(4.0, 0.5));
+}
+
+float altGrid(in vec3 p) {
+  // Grid parameters
+  p.x -= 3.;
+  float gridSize = 1.0;      // Size of each segment
+  float gapSize = 0.5;       // Width of the cuts/gaps
+
+  // Create the base torus
+  float torus = sdTorusX(p, vec2(4.0, 0.5));
+
+  // Create cutting planes along each axis
+  vec3 q = mod(p + gridSize * 0.5, gridSize) - gridSize * 0.5;
+  float cuts = -min(min(
+    abs(q.x) - (gridSize * 0.5 - gapSize * 0.5),
+    abs(q.y) - (gridSize * 0.5 - gapSize * 0.5)),
+    abs(q.z) - (gridSize * 0.5 - gapSize * 0.5)
+  );
+
+  // Combine torus with cuts
+  return max(sdBox(p, vec3(4., 4., 4.)), cuts);
+}
+
+// altStars: Grid of intersecting cylinders
+// - Vertical cylinders (along Y) in a grid on XZ plane
+// - Horizontal cylinders along X axis in a grid on YZ plane
+// - Horizontal cylinders along Z axis in a grid on XY plane
+// All soft-blended together with smin
+float altStars(in vec3 p) {
+  // Configurable parameters 
+
+  p.y += 3.75;
+  float spacing = 1.0;       // Distance between cylinder centers
+  float cylLength = 4.0;     // Half-length of each cylinder
+  float cylRadius = 0.01;    // Thickness/radius of cylinders
+  float blendK = 0.2;       // Smoothness of intersections
+
+  // Grid bounds (how many cylinders in each direction)
+  float gridExtent = 4.0;    // Creates cylinders from -gridExtent to +gridExtent
+
+  float d = 1e10;
+
+  // Vertical cylinders (along Y axis) - grid on XZ plane
+  vec3 qV = p;
+  qV.xz = mod(qV.xz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Cylinder along Y: use xz distance
+  float vertCyl = length(qV.xz) - cylRadius;
+  // Clamp to grid bounds and cylinder length
+  float boundsV = max(max(abs(p.x), abs(p.z)) - gridExtent, abs(p.y) - cylLength);
+  vertCyl = max(vertCyl, boundsV);
+  d = vertCyl;
+
+  // Horizontal cylinders along X axis - grid on YZ plane
+  vec3 qX = p;
+  qX.yz = mod(qX.yz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Cylinder along X: use yz distance
+  float horizCylX = length(qX.yz) - cylRadius;
+  // Clamp to grid bounds and cylinder length
+  float boundsX = max(max(abs(p.y), abs(p.z)) - gridExtent, abs(p.x) - cylLength);
+  horizCylX = max(horizCylX, boundsX);
+  d = smin(d, horizCylX, blendK);
+
+  // Horizontal cylinders along Z axis - grid on XY plane
+  vec3 qZ = p;
+  qZ.xy = mod(qZ.xy + spacing * 0.5, spacing) - spacing * 0.5;
+  // Cylinder along Z: use xy distance
+  float horizCylZ = length(qZ.xy) - cylRadius;
+  // Clamp to grid bounds and cylinder length
+  float boundsZ = max(max(abs(p.x), abs(p.y)) - gridExtent, abs(p.z) - cylLength);
+  horizCylZ = max(horizCylZ, boundsZ);
+  d = smin(d, horizCylZ, blendK);
+
+  return d;
+}
+
+// altStarsCapped: Grid of intersecting capsules (pill shapes)
+// Same structure as altStars but with rounded ends
+float altStarsCapped(in vec3 p) {
+  // Configurable parameters
+  p.y += 3.75;
+  float spacing = .5;       // Distance between capsule centers
+  float cylLength = 4.0;     // Half-length of each capsule
+  float cylRadius = 0.05;    // Thickness/radius of capsules
+  float blendK = 0.0;        // Smoothness of intersections
+
+  // Grid bounds
+  float gridExtent = 4.0;
+
+  float d = 1e10;
+
+  // Vertical capsules (along Y axis) - grid on XZ plane
+  vec3 qV = p;
+  qV.xz = mod(qV.xz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Capsule along Y: clamp Y to line segment, then distance to that point
+  float clampedY = clamp(qV.y, -cylLength, cylLength);
+  float vertCap = length(vec3(qV.x, qV.y - clampedY, qV.z)) - cylRadius;
+  // Clamp to grid bounds
+  float boundsV = max(abs(p.x), abs(p.z)) - gridExtent;
+  vertCap = max(vertCap, boundsV);
+  d = vertCap;
+
+  // Horizontal capsules along X axis - grid on YZ plane
+  vec3 qX = p;
+  qX.yz = mod(qX.yz + spacing * 0.5, spacing) - spacing * 0.5;
+  // Capsule along X: clamp X to line segment
+  float clampedX = clamp(qX.x, -cylLength, cylLength);
+  float horizCapX = length(vec3(qX.x - clampedX, qX.y, qX.z)) - cylRadius;
+  // Clamp to grid bounds
+  float boundsX = max(abs(p.y), abs(p.z)) - gridExtent;
+  horizCapX = max(horizCapX, boundsX);
+  d = smin(d, horizCapX, blendK);
+
+  // Horizontal capsules along Z axis - grid on XY plane
+  vec3 qZ = p;
+  qZ.xy = mod(qZ.xy + spacing * 0.5, spacing) - spacing * 0.5;
+  // Capsule along Z: clamp Z to line segment
+  float clampedZ = clamp(qZ.z, -cylLength, cylLength);
+  float horizCapZ = length(vec3(qZ.x, qZ.y, qZ.z - clampedZ)) - cylRadius;
+  // Clamp to grid bounds
+  float boundsZ = max(abs(p.x), abs(p.y)) - gridExtent;
+  horizCapZ = max(horizCapZ, boundsZ);
+  d = smin(d, horizCapZ, blendK);
+
+  return d;
+}
+
+/*
 // Surface extraction
+float mapDistance(vec3 p) {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+    return mix(alt(p), mapScene(p), t);
+}*/
+
+/*
 float mapDistance(vec3 p) {
     return mapScene(p);
 }
+*/
+
+
+// DEMO 1 ANIMATION
+
+
+float mapDistance(vec3 p) {
+    float t = relicT();
+    float show = showMeHow(p);
+    return min(show, mix(alt(p), mapScene(p), t));
+    //return show;
+    //return  mix(mapScene(p), altStarsCapped(p), t);
+}
+
+
+// DEMO 2 ANIMATION
+/*
+float mapDistance(vec3 p) {
+    float tri = abs(fract(uTime / 4.) * 2.0 - 1.0);
+    float t = sin(tri * PI * 0.5);
+
+    vec3 showP = p;
+    //showP.xy *= Rot(mix(PI / 2., 0., t));
+    showP.y += mix(0.55, 0., t);
+    float show = showMeHow(showP);
+    //return min(stampHand(p), min(show, mapScene(p)));
+    //return min(show, mapScene(p));
+    return mapScene(p);
+}
+*/
