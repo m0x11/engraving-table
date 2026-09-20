@@ -12,6 +12,9 @@
  * values at every size. The mesh comes out in model units; physical mm =
  * units x 2.3205128 (18.1/7.8) at EVERY size — see resize step.
  *
+ * Every sized ring also carries a "925" sterling hallmark on the bore,
+ * between the end of the date and the logo stamp (see HALLMARK_TEXT).
+ *
  * The resulting SDF accepts uniforms:
  * - uTargetDate                Unix timestamp for planetary positions
  * - uGlyphIndices[11]          glyph per engraving slot
@@ -38,10 +41,46 @@ const GLYPH_CHARS = [
   'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'V', 'Y'
 ];
 
+// Sterling hallmark — engraved on the bore in the date's font at
+// HALLMARK_SCALE of the date's em, centred in the arc between the end of the
+// date and the logo stamp. Must be spelled from GLYPH_CHARS: glyph bitmaps
+// are drawn vertically flipped inside their plane boxes, which only reads
+// right for glyphs centred on the 0.34 line (digits, caps, the shifted '·').
+const HALLMARK_TEXT = '925';
+const HALLMARK_SCALE = 0.75;
+const ADVANCE = 0.52;
+const NUM_POSITIONS = 11;
+
 function loadFontData() {
   const jsonData = JSON.parse(fs.readFileSync(FONT_JSON_PATH, 'utf8'));
   const png = PNG.sync.read(fs.readFileSync(FONT_PNG_PATH));
-  return { json: jsonData, atlasWidth: png.width, atlasHeight: png.height };
+  return { json: jsonData, png, atlasWidth: png.width, atlasHeight: png.height };
+}
+
+// Horizontal INK extent of a glyph in em (plane) units. planeBounds include
+// the MSDF distance-range padding, so measure the actual shape: atlas columns
+// where the median channel crosses 0.5.
+function glyphInkX(fontData, char) {
+  const glyph = getGlyphData(fontData, char);
+  const { png } = fontData;
+  const { left, right, top, bottom } = glyph.atlasBounds;
+  const inside = (x, y) => {
+    const i = (y * png.width + x) * 4;
+    const [r, g, b] = [png.data[i], png.data[i + 1], png.data[i + 2]];
+    return Math.max(Math.min(r, g), Math.min(Math.max(r, g), b)) > 127.5;
+  };
+  let minX = Infinity, maxX = -Infinity;
+  // atlas yOrigin is the bottom; PNG rows run from the top
+  for (let y = Math.floor(png.height - top); y < Math.ceil(png.height - bottom); y++) {
+    for (let x = Math.floor(left); x < Math.ceil(right); x++) {
+      if (inside(x, y)) { minX = Math.min(minX, x); maxX = Math.max(maxX, x + 1); }
+    }
+  }
+  const emPerPx = (glyph.planeBounds.right - glyph.planeBounds.left) / (right - left);
+  return {
+    left: glyph.planeBounds.left + (minX - left) * emPerPx,
+    right: glyph.planeBounds.left + (maxX - left) * emPerPx,
+  };
 }
 
 function getGlyphData(fontData, char) {
@@ -119,11 +158,33 @@ float glyphSdf${i}(vec2 p) {
     dispatcherCases += `  ${i === 0 ? 'if' : 'else if'} (idx == ${i}) return glyphSdf${i}(p);\n`;
   }
 
+  // Hallmark layout, in em. The date always ends in a year digit, so its ink
+  // ends at the last cell's origin + the widest digit's ink edge.
+  const xStart = -(NUM_POSITIONS * ADVANCE) * 0.5 + ADVANCE * 0.25;
+  const digitInkRight = Math.max(...'0123456789'.split('').map(c => glyphInkX(fontData, c).right));
+  const dateEndEm = xStart + (NUM_POSITIONS - 1) * ADVANCE + digitInkRight;
+  const hallmarkChars = [...HALLMARK_TEXT];
+  const unknown = hallmarkChars.filter(c => !GLYPH_CHARS.includes(c));
+  if (unknown.length) {
+    console.error(`Error: hallmark characters not in GLYPH_CHARS: ${unknown.join(' ')}`);
+    process.exit(1);
+  }
+  const hallmarkInkLeft = glyphInkX(fontData, hallmarkChars[0]).left;
+  const hallmarkInkRight = (hallmarkChars.length - 1) * ADVANCE +
+    glyphInkX(fontData, hallmarkChars[hallmarkChars.length - 1]).right;
+  const hallmarkInkCenterEm = (hallmarkInkLeft + hallmarkInkRight) / 2;
+  const hallmarkGlyphCalls = hallmarkChars.map((c, i) =>
+    `  d = min(d, glyphSdf${GLYPH_CHARS.indexOf(c)}(p - vec2(${(i * ADVANCE).toFixed(2)}, 0.0))); // '${c}'`
+  ).join('\n');
+
   return `
 // ========== TEXT SDF FUNCTIONS (sized) ==========
 #define PX_RANGE 8.0
 #define GLYPH_SIZE 48.0
-#define NUM_POSITIONS 11
+#define NUM_POSITIONS ${NUM_POSITIONS}
+#define HALLMARK_SCALE ${HALLMARK_SCALE.toFixed(2)}
+#define DATE_END_EM ${dateEndEm.toFixed(6)}
+#define HALLMARK_INK_CENTER_EM ${hallmarkInkCenterEm.toFixed(6)}
 
 float median(vec3 v) {
   return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
@@ -142,9 +203,16 @@ ${dispatcherCases}
   return 1000.0; // fallback
 }
 
+// "${HALLMARK_TEXT}" — fixed glyphs, first cell's origin at x = 0
+float hallmarkSdf2D(vec2 p) {
+  float d = 1000.0;
+${hallmarkGlyphCalls}
+  return d;
+}
+
 float textSdf2D(vec2 p) {
   float d = 1000.0;
-  float advance = 0.52;
+  float advance = ${ADVANCE};
   float totalWidth = float(NUM_POSITIONS) * advance;
   float xStart = -totalWidth * 0.5 + advance * 0.25;
 
@@ -185,6 +253,18 @@ float textOnInnerCylinder(vec3 p) {
 
   float d2d = textSdf2D(vec2(textX, textY)) * textScale;
 
+  // Sterling hallmark: same font and depth at HALLMARK_SCALE of the date's
+  // em, on the band's centreline, its ink centred in the bore arc between
+  // the end of the date's ink and the stamp's near edge (arc lengths run
+  // in the reading direction from the date's centre; the stamp sits at PI).
+  float hallScale = textScale * HALLMARK_SCALE;
+  float dateEndArc = DATE_END_EM * textScale;
+  float stampEdgeArc = (PI - asin(STAMP_HALF_LEN / cylinderRadius)) * cylinderRadius;
+  float hallArc = 0.5 * (dateEndArc + stampEdgeArc);
+  float hallX = (-angle * cylinderRadius - hallArc) / hallScale + HALLMARK_INK_CENTER_EM;
+  float hallY = h / hallScale + 0.34;
+  d2d = min(d2d, hallmarkSdf2D(vec2(hallX, hallY)) * hallScale);
+
   float textDepth = 0.172 * uTextScale;
   float surfaceDist = cylinderRadius - r;
 
@@ -216,6 +296,9 @@ float targetDate;
 #define SHOULDER_K (7.3 * -(EPH_BAND_CENTER_Y) / 4.5)
 #define STAMP_Y (EPH_BAND_CENTER_Y - OUTER_R + 0.53 * uDetail)
 #define STAMP_CURVE (-0.13 * 4.48 / OUTER_R)
+// stamp half-length along the bore: fractus() is negative for |re| < 1.598,
+// and stamp() maps model units into that plane by 1.4 / uDetail
+#define STAMP_HALF_LEN (1.598 * uDetail / 1.4)
 
 #define MERCURY 0
 #define VENUS   1
